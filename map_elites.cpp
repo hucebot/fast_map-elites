@@ -21,7 +21,7 @@ class MapElites {
 public:
     using centroids_t = Eigen::Matrix<S, Params::num_cells, Params::dim_features>;
     using archive_t = Eigen::Matrix<S, Params::num_cells, Params::dim_search_space>;
-    using archive_fit_t = Eigen::Matrix<S, Params::num_cells, 1>;
+    using archive_fit_t = Eigen::Vector<S, Params::num_cells>;
 
     MapElites() : _centroids(centroids_t::Random()), _archive(archive_t::Random())
     {
@@ -41,8 +41,8 @@ public:
     double qd_score() const { 
         double qd = 0;
         for (int i = 0; i < Params::num_cells; ++i)
-            if (_archive_fit(i, 0) != -std::numeric_limits<S>::max())
-                qd += _archive_fit(i, 0);
+            if (_archive_fit(i) != -std::numeric_limits<S>::max())
+                qd += _archive_fit(i);
         return qd;
     }
     void step()
@@ -58,7 +58,7 @@ public:
             _batch.row(i) = _batch.row(i).cwiseMin(1).cwiseMax(0);
 
         _loop(0, Params::batch_size, [&](int i) { // evaluate the batch
-            _batch_features.row(i) = _fit_functions[i].eval(_batch.row(i), _batch_fitness.row(i)[0]);
+            _batch_features.row(i) = _fit_functions[i].eval(_batch.row(i), _batch_fitness(i));
         });
         // competition
         std::fill(_new_rank.begin(), _new_rank.end(), -1);
@@ -80,14 +80,14 @@ public:
                     }
                 }
             }
-            if (_batch_fitness.row(i)[0] > _archive_fit.row(best_i)[0])
+            if (_batch_fitness.row(i)[0] > _archive_fit(best_i))
                 _new_rank[i] = best_i;
         });
         // apply the new ranks
         for (int i = 0; i < Params::batch_size; ++i) {
             if (_new_rank[i] != -1) {
                 _archive.row(_new_rank[i]) = _batch.row(i);
-                _archive_fit.row(_new_rank[i]) = _batch_fitness.row(i);
+                _archive_fit(_new_rank[i]) = _batch_fitness(i);
             }
         }
     }
@@ -113,7 +113,7 @@ protected:
 
     // batch
     using batch_t = Eigen::Matrix<S, Params::batch_size, Params::dim_search_space>;
-    using batch_fit_t = Eigen::Matrix<S, Params::batch_size, 1>;
+    using batch_fit_t = Eigen::Vector<S, Params::batch_size>;
     using batch_features_t = Eigen::Matrix<S, Params::batch_size, Params::dim_features>;
     using fit_functions_t = std::array<Fit, Params::batch_size>;
     using batch_ranks_t = Eigen::Vector<int, Params::batch_size * 2>;
