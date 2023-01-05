@@ -53,7 +53,10 @@ namespace map_elites {
         void step()
         {
             for (int i = 0; i < Params::batch_size * 2; ++i)
-                _batch_ranks[i] = _rand_int(_r_gen); // yes, from all the map!
+                _batch_ranks[i] = _rand_int(_r_gen); // yes, from all the map, including niches not filled yet
+            for (int i = 0; i < Params::batch_size * 2; ++i) // if empty, we change the random vector to foster exploration
+                if (_archive_fit(_batch_ranks[i]) ==  -std::numeric_limits<S>::max())
+                    _archive.row(_batch_ranks[i]) = Eigen::Vector<S, Params::dim_search_space>::Random();
             for (int i = 0; i < Params::batch_size; ++i) // line variation
                 _batch.row(i) = _archive.row(_batch_ranks[i * 2]) + Params::sigma_1 * _gaussian(_r_gen) * (_archive.row(_batch_ranks[i * 2]) - _archive.row(_batch_ranks[i * 2 + 1]));
             for (int i = 0; i < Params::batch_size; ++i) // gaussian mutation
