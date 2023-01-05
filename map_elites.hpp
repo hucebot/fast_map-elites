@@ -27,7 +27,7 @@ namespace map_elites {
         using archive_t = Eigen::Matrix<S, Params::num_cells, Params::dim_search_space, Eigen::RowMajor>;
         using archive_fit_t = Eigen::Vector<S, Params::num_cells>;
 
-        MapElites() : _centroids(centroids_t::Random()), _archive(archive_t::Random())
+        MapElites() : _centroids(_rand<centroids_t>())
         {
             if (Params::grid) {
                 assert(Params::dim_features == 2);
@@ -56,14 +56,20 @@ namespace map_elites {
                 _batch_ranks[i] = _rand_int(_r_gen); // yes, from all the map, including niches not filled yet
             for (int i = 0; i < Params::batch_size * 2; ++i) // if empty, we change the random vector to foster exploration
                 if (_archive_fit(_batch_ranks[i]) ==  -std::numeric_limits<S>::max())
-                    _archive.row(_batch_ranks[i]) = Eigen::Vector<S, Params::dim_search_space>::Random();
+                    _archive.row(_batch_ranks[i]) = _rand<Eigen::Vector<S, Params::dim_search_space>>();
             for (int i = 0; i < Params::batch_size; ++i) // line variation
                 _batch.row(i) = _archive.row(_batch_ranks[i * 2]) + Params::sigma_1 * _gaussian(_r_gen) * (_archive.row(_batch_ranks[i * 2]) - _archive.row(_batch_ranks[i * 2 + 1]));
-            for (int i = 0; i < Params::batch_size; ++i) // gaussian mutation
-                for (int j = 0; j < Params::dim_search_space; ++j)
-                    _batch(i, j) += _gaussian(_r_gen) * Params::sigma_2;
-            for (int i = 0; i < Params::batch_size; ++i) // clip in [0,1]
-                _batch.row(i) = _batch.row(i).cwiseMin(1).cwiseMax(0);
+            for (int i = 0; i < Params::batch_size; ++i) // gaussian mutation with bounce back
+                for (int j = 0; j < Params::dim_search_space; ++j) {
+                    double r = _gaussian(_r_gen) * Params::sigma_2;
+                    _batch(i, j) = _batch(i, j) + r;
+                    _batch(i, j) += _batch(i, j) > 1 ? (1 - _batch(i, j)) * 2 : 0;
+                    _batch(i, j) += _batch(i, j) < 0 ? -_batch(i, j) * 2: 0;
+                    assert(_batch(i,j) >= 0 && "Params::sigma_2 too large!");
+                    assert(_batch(i,j) <= 1 &&  "Params::sigma_2 too large!");               
+                }
+            // for (int i = 0; i < Params::batch_size; ++i) // clip in [0,1] (this should not be needed, but could happen because of num. errors or big sigma)
+            //      _batch.row(i) = _batch.row(i).cwiseMin(1).cwiseMax(0);
 
             _loop(0, Params::batch_size, [&](int i) { // evaluate the batch
                 _batch_features.row(i) = _fit_functions[i].eval(_batch.row(i), _batch_fitness(i));
@@ -106,6 +112,11 @@ namespace map_elites {
             for (size_t i = begin; i < end; ++i)
                 f(i);
 #endif
+        }
+        // random in [0,1] (Eigen is in [-1,1])
+        template<typename M>
+        inline M _rand() const {
+            return 0.5 * (M::Random().array() + 1.);
         }
         // our main data
         centroids_t _centroids;
