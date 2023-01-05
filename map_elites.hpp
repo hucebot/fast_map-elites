@@ -23,8 +23,8 @@ namespace map_elites {
     template <typename Params, typename Fit, typename S = double>
     class MapElites {
     public:
-        using centroids_t = Eigen::Matrix<S, Params::num_cells, Params::dim_features>;
-        using archive_t = Eigen::Matrix<S, Params::num_cells, Params::dim_search_space>;
+        using centroids_t = Eigen::Matrix<S, Params::num_cells, Params::dim_features, Eigen::RowMajor>;
+        using archive_t = Eigen::Matrix<S, Params::num_cells, Params::dim_search_space, Eigen::RowMajor>;
         using archive_fit_t = Eigen::Vector<S, Params::num_cells>;
 
         MapElites() : _centroids(centroids_t::Random()), _archive(archive_t::Random())
@@ -76,16 +76,9 @@ namespace map_elites {
                     best_i = x * Params::grid_size + y;
                 }
                 else {
-                    double best_dist = std::numeric_limits<S>::max();
-                    for (int j = 0; j < Params::num_cells; ++j) {
-                        double d = (_batch_features.row(i) - _centroids.row(j)).squaredNorm();
-                        if (d < best_dist) {
-                            best_dist = d;
-                            best_i = j;
-                        }
-                    }
+                    (_centroids.rowwise() - _batch_features.row(i)).rowwise().squaredNorm().minCoeff(&best_i);
                 }
-                if (_batch_fitness.row(i)[0] > _archive_fit(best_i))
+                if (_batch_fitness(i) > _archive_fit(best_i))
                     _new_rank[i] = best_i;
             });
             // apply the new ranks
@@ -117,9 +110,9 @@ namespace map_elites {
         archive_fit_t _archive_fit = archive_fit_t::Constant(-std::numeric_limits<S>::max());
 
         // batch
-        using batch_t = Eigen::Matrix<S, Params::batch_size, Params::dim_search_space>;
+        using batch_t = Eigen::Matrix<S, Params::batch_size, Params::dim_search_space, Eigen::RowMajor>;
         using batch_fit_t = Eigen::Vector<S, Params::batch_size>;
-        using batch_features_t = Eigen::Matrix<S, Params::batch_size, Params::dim_features>;
+        using batch_features_t = Eigen::Matrix<S, Params::batch_size, Params::dim_features,  Eigen::RowMajor>;
         using fit_functions_t = std::array<Fit, Params::batch_size>;
         using batch_ranks_t = Eigen::Vector<int, Params::batch_size * 2>;
         using new_rank_t = Eigen::Vector<int, Params::batch_size>;

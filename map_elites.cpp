@@ -2,8 +2,8 @@
 
 template <typename Params, typename S = double>
 struct FitArm {
-    using indiv_t = Eigen::Matrix<S, 1, Params::dim_search_space>;
-    using features_t = Eigen::Matrix<S, 1, Params::dim_features>;
+    using indiv_t = Eigen::Matrix<S, 1, Params::dim_search_space, Eigen::RowMajor>;
+    using features_t = Eigen::Matrix<S, 1, Params::dim_features, Eigen::RowMajor>;
     // keep the intermediate values to avoid reallocations
     indiv_t _t;
     indiv_t _c;
@@ -28,7 +28,7 @@ struct Params {
     static constexpr double sigma_1 = 0.15;
     static constexpr double sigma_2 = 0.01;
     static constexpr bool verbose = false;
-    static constexpr bool grid = true;
+    static constexpr bool grid = false;
     static constexpr int grid_size = 64;
     static constexpr int num_cells = grid ? grid_size * grid_size : 12000; // 12000; // 8192;
 };
@@ -43,7 +43,7 @@ int main()
 
     std::ofstream qd_ofs("qd.dat");
 
-    for (size_t i = 0; i < 1e6 / Params::batch_size; ++i) {
+    for (size_t i = 0; i < 2e6 / Params::batch_size; ++i) {
         map_elites.step();
         qd_ofs << i * Params::batch_size << " " << map_elites.qd_score() << std::endl;
         if (Params::verbose)
