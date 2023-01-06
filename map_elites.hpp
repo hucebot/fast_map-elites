@@ -116,14 +116,15 @@ namespace map_elites {
             for (int i = 0; i < Params::batch_size; ++i) {
                 if (_new_id[i] != -1) {
                     _archive.row(_new_id[i]) = _batch.row(i);
+                    if (_archive_fit(_new_id[i]) == -std::numeric_limits<S>::max())
+                        _filled_ids.push_back(_new_id[i]);
                     _archive_fit(_new_id[i]) = _batch_fitness(i);
-                    _filled_ids.push_back(_new_id[i]);
                 }
             }
 
             // we stop the infill when we have enough cells filled
-            int c = (_archive_fit.array() > -std::numeric_limits<S>::max()).count();
-            _infill = (c < Params::infill_pct * _archive.rows());
+            _infill = (_filled_ids.size() < Params::infill_pct * _archive.rows());
+            assert(_filled_ids.size() <= Params::num_cells);
         }
 
     protected:
