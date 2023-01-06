@@ -24,11 +24,12 @@ struct FitArm {
 struct Params {
     static constexpr int dim_features = 2;
     static constexpr int dim_search_space = 10;
-    static constexpr int batch_size = 512;
+    static constexpr int batch_size = 128;
     static constexpr double sigma_1 = 0.15;
     static constexpr double sigma_2 = 0.01;
+    static constexpr double infill_pct = 0.2;
     static constexpr bool verbose = false;
-    static constexpr bool grid = false;
+    static constexpr bool grid = true;
     static constexpr int grid_size = 64;
     static constexpr int num_cells = grid ? grid_size * grid_size : 12000; // 12000; // 8192;
 };
@@ -43,7 +44,7 @@ int main()
 
     std::ofstream qd_ofs("qd.dat");
 
-    for (size_t i = 0; i < 2e6 / Params::batch_size; ++i) {
+    for (size_t i = 0; i < 0.5 * 1e6 / Params::batch_size; ++i) {
         map_elites.step();
         qd_ofs << i * Params::batch_size << " " << map_elites.qd_score() << std::endl;
         if (Params::verbose)
