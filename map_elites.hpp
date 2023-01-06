@@ -52,7 +52,7 @@ namespace map_elites {
                         _centroids(i, j) = rand(gen);
 #endif // otherwise we already have random centroids
             }
-            _filled_ranks.reserve(Params::num_cells);
+            _filled_ids.reserve(Params::num_cells);
         }
 
         const archive_t& archive() const { return _archive; }
@@ -69,17 +69,17 @@ namespace map_elites {
 
         void step()
         {
-            if (_first) {
+            if (_infill) {
                 _batch = _rand<batch_t>();
             }
             else { // normal loop
                 // selection
                 for (int i = 0; i < Params::batch_size * 2; ++i) // fill with random id of of filled cells
-                    _batch_ranks[i] = _filled_ranks[_rand_rank(_r_gen, uint_dist_param_t(0, _filled_ranks.size()-1))];
+                    _batch_ids[i] = _filled_ids[_rand_id(_r_gen, uint_dist_param_t(0, _filled_ids.size()-1))];
 
                 // variation
                 for (int i = 0; i < Params::batch_size; ++i) // line variation
-                    _batch.row(i) = _archive.row(_batch_ranks[i * 2]) + Params::sigma_1 * _gaussian(_r_gen) * (_archive.row(_batch_ranks[i * 2]) - _archive.row(_batch_ranks[i * 2 + 1]));
+                    _batch.row(i) = _archive.row(_batch_ids[i * 2]) + Params::sigma_1 * _gaussian(_r_gen) * (_archive.row(_batch_ids[i * 2]) - _archive.row(_batch_ids[i * 2 + 1]));
                 for (int i = 0; i < Params::batch_size; ++i) // gaussian mutation with bounce back
                     for (int j = 0; j < Params::dim_search_space; ++j) {
                         // bounce does not seem to change much, but it's not worse than a simple cap
@@ -96,7 +96,7 @@ namespace map_elites {
                 _batch_features.row(i) = _fit_functions[i].eval(_batch.row(i), _batch_fitness(i));
             });
             // competition
-            std::fill(_new_rank.begin(), _new_rank.end(), -1);
+            std::fill(_new_id.begin(), _new_id.end(), -1);
             _loop(0, Params::batch_size, [&](int i) {
                 // search for the closest centroid / the grid
                 int best_i = -1;
@@ -109,21 +109,21 @@ namespace map_elites {
                     (_centroids.rowwise() - _batch_features.row(i)).rowwise().squaredNorm().minCoeff(&best_i);
                 }
                 if (_batch_fitness(i) > _archive_fit(best_i))
-                    _new_rank[i] = best_i;
+                    _new_id[i] = best_i;
             });
 
-            // apply the new ranks
+            // apply the new ids
             for (int i = 0; i < Params::batch_size; ++i) {
-                if (_new_rank[i] != -1) {
-                    _archive.row(_new_rank[i]) = _batch.row(i);
-                    _archive_fit(_new_rank[i]) = _batch_fitness(i);
-                    _filled_ranks.push_back(_new_rank[i]);
+                if (_new_id[i] != -1) {
+                    _archive.row(_new_id[i]) = _batch.row(i);
+                    _archive_fit(_new_id[i]) = _batch_fitness(i);
+                    _filled_ids.push_back(_new_id[i]);
                 }
             }
 
             // we stop the infill when we have enough cells filled
             int c = (_archive_fit.array() > -std::numeric_limits<S>::max()).count();
-            _first = (c < Params::infill_pct * _archive.rows());
+            _infill = (c < Params::infill_pct * _archive.rows());
         }
 
     protected:
@@ -148,8 +148,6 @@ namespace map_elites {
             return 0.5 * (M::Random().array() + 1.);
         }
 
-        // true when we are still at the infill stage
-        bool _first = true;
 
         // our main data
         centroids_t _centroids = _rand<centroids_t>();
@@ -157,28 +155,31 @@ namespace map_elites {
         archive_fit_t _archive_fit = archive_fit_t::Constant(-std::numeric_limits<S>::max());
 
         // internal list of filled cells
-        std::vector<int> _filled_ranks;
+        std::vector<int> _filled_ids;
+
+        // true when we are still at the infill stage
+        bool _infill = true;
 
         // batch
         using batch_t = Eigen::Matrix<S, Params::batch_size, Params::dim_search_space, Eigen::RowMajor>;
         using batch_fit_t = Eigen::Vector<S, Params::batch_size>;
         using batch_features_t = Eigen::Matrix<S, Params::batch_size, Params::dim_features, Eigen::RowMajor>;
         using fit_functions_t = std::array<Fit, Params::batch_size>;
-        using batch_ranks_t = Eigen::Vector<int, Params::batch_size * 2>;
-        using new_rank_t = Eigen::Vector<int, Params::batch_size>;
+        using batch_ids_t = Eigen::Vector<int, Params::batch_size * 2>;
+        using new_id_t = Eigen::Vector<int, Params::batch_size>;
 
         batch_t _batch;
         batch_fit_t _batch_fitness;
         batch_features_t _batch_features;
-        batch_ranks_t _batch_ranks;
+        batch_ids_t _batch_ids;
         fit_functions_t _fit_functions;
-        new_rank_t _new_rank;
+        new_id_t _new_id;
 
         // random
         using uint_dist_param_t = std::uniform_int_distribution<>::param_type;
         std::random_device _rand_device;
         std::default_random_engine _r_gen{_rand_device()};
-        std::uniform_int_distribution<int> _rand_rank;
+        std::uniform_int_distribution<int> _rand_id;
         std::normal_distribution<> _gaussian{0, 1};
     };
 
