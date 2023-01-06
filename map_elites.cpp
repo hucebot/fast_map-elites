@@ -44,7 +44,7 @@ int main()
 
     std::ofstream qd_ofs("qd.dat");
 
-    for (size_t i = 0; i < 0.5 * 1e6 / Params::batch_size; ++i) {
+    for (size_t i = 0; i < 1e6 / Params::batch_size; ++i) {
         map_elites.step();
         qd_ofs << i * Params::batch_size << " " << map_elites.qd_score() << std::endl;
         if (Params::verbose)

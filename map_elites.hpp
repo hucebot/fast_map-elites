@@ -75,8 +75,8 @@ namespace map_elites {
             else { // normal loop
                 // selection
                 for (int i = 0; i < Params::batch_size * 2; ++i) // fill with random id of of filled cells
-                        _batch_ranks[i] = _filled_ranks[_rand_rank(_r_gen, uint_dist_param_t(0, _filled_ranks.size()))];
-                
+                    _batch_ranks[i] = _filled_ranks[_rand_rank(_r_gen, uint_dist_param_t(0, _filled_ranks.size()-1))];
+
                 // variation
                 for (int i = 0; i < Params::batch_size; ++i) // line variation
                     _batch.row(i) = _archive.row(_batch_ranks[i * 2]) + Params::sigma_1 * _gaussian(_r_gen) * (_archive.row(_batch_ranks[i * 2]) - _archive.row(_batch_ranks[i * 2 + 1]));
@@ -180,7 +180,6 @@ namespace map_elites {
         std::default_random_engine _r_gen{_rand_device()};
         std::uniform_int_distribution<int> _rand_rank;
         std::normal_distribution<> _gaussian{0, 1};
-
     };
 
 } // namespace map_elites
