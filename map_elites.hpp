@@ -17,6 +17,11 @@
 #include <tbb/parallel_for.h>
 #endif
 
+#ifdef USE_BOOST // SOBOL centroids is a bit better, but requires boost
+#include <boost/random/sobol.hpp>
+#include <boost/random/uniform_01.hpp>
+#endif
+
 #include <Eigen/Core>
 
 namespace map_elites {
@@ -27,7 +32,7 @@ namespace map_elites {
         using archive_t = Eigen::Matrix<S, Params::num_cells, Params::dim_search_space, Eigen::RowMajor>;
         using archive_fit_t = Eigen::Vector<S, Params::num_cells>;
 
-        MapElites() : _centroids(_rand<centroids_t>())
+        MapElites()
         {
             if (Params::grid) {
                 assert(Params::dim_features == 2);
@@ -37,6 +42,17 @@ namespace map_elites {
                         _centroids(i * Params::grid_size + j, 1) = double(j) / Params::grid_size;
                     }
             }
+            else {
+#ifdef USE_BOOST
+                // make the centroids with a sobol sequence (only if boost available)
+                boost::random::sobol gen(Params::dim_features);
+                boost::random::uniform_01<> rand;
+                for (int i = 0; i < _centroids.rows(); ++i)
+                    for (int j = 0; j < _centroids.cols(); ++j)
+                        _centroids(i, j) = rand(gen);
+#endif // otherwise we already have random centroids
+            }
+            _filled_ranks.reserve(Params::num_cells);
         }
 
         const archive_t& archive() const { return _archive; }
@@ -50,26 +66,31 @@ namespace map_elites {
                     qd += _archive_fit(i);
             return qd;
         }
+
         void step()
         {
-            for (int i = 0; i < Params::batch_size * 2; ++i)
-                _batch_ranks[i] = _rand_int(_r_gen); // yes, from all the map, including niches not filled yet
-            for (int i = 0; i < Params::batch_size * 2; ++i) // if empty, we change the random vector to foster exploration
-                if (_archive_fit(_batch_ranks[i]) ==  -std::numeric_limits<S>::max())
-                    _archive.row(_batch_ranks[i]) = _rand<Eigen::Vector<S, Params::dim_search_space>>();
-            for (int i = 0; i < Params::batch_size; ++i) // line variation
-                _batch.row(i) = _archive.row(_batch_ranks[i * 2]) + Params::sigma_1 * _gaussian(_r_gen) * (_archive.row(_batch_ranks[i * 2]) - _archive.row(_batch_ranks[i * 2 + 1]));
-            for (int i = 0; i < Params::batch_size; ++i) // gaussian mutation with bounce back
-                for (int j = 0; j < Params::dim_search_space; ++j) {
-                    double r = _gaussian(_r_gen) * Params::sigma_2;
-                    _batch(i, j) = _batch(i, j) + r;
-                    _batch(i, j) += _batch(i, j) > 1 ? (1 - _batch(i, j)) * 2 : 0;
-                    _batch(i, j) += _batch(i, j) < 0 ? -_batch(i, j) * 2: 0;
-                    assert(_batch(i,j) >= 0 && "Params::sigma_2 too large!");
-                    assert(_batch(i,j) <= 1 &&  "Params::sigma_2 too large!");               
-                }
-            // for (int i = 0; i < Params::batch_size; ++i) // clip in [0,1] (this should not be needed, but could happen because of num. errors or big sigma)
-            //      _batch.row(i) = _batch.row(i).cwiseMin(1).cwiseMax(0);
+            if (_first) {
+                _batch = _rand<batch_t>();
+            }
+            else { // normal loop
+                // selection
+                for (int i = 0; i < Params::batch_size * 2; ++i) // fill with random id of of filled cells
+                        _batch_ranks[i] = _filled_ranks[_rand_rank(_r_gen, uint_dist_param_t(0, _filled_ranks.size()))];
+                
+                // variation
+                for (int i = 0; i < Params::batch_size; ++i) // line variation
+                    _batch.row(i) = _archive.row(_batch_ranks[i * 2]) + Params::sigma_1 * _gaussian(_r_gen) * (_archive.row(_batch_ranks[i * 2]) - _archive.row(_batch_ranks[i * 2 + 1]));
+                for (int i = 0; i < Params::batch_size; ++i) // gaussian mutation with bounce back
+                    for (int j = 0; j < Params::dim_search_space; ++j) {
+                        // bounce does not seem to change much, but it's not worse than a simple cap
+                        double r = _gaussian(_r_gen) * Params::sigma_2;
+                        _batch(i, j) = _batch(i, j) + r;
+                        _batch(i, j) += _batch(i, j) > 1 ? (1 - _batch(i, j)) * 2 : 0;
+                        _batch(i, j) += _batch(i, j) < 0 ? -_batch(i, j) * 2 : 0;
+                        assert(_batch(i, j) >= 0 && "Params::sigma_2 too large!");
+                        assert(_batch(i, j) <= 1 && "Params::sigma_2 too large!");
+                    }
+            }
 
             _loop(0, Params::batch_size, [&](int i) { // evaluate the batch
                 _batch_features.row(i) = _fit_functions[i].eval(_batch.row(i), _batch_fitness(i));
@@ -90,19 +111,26 @@ namespace map_elites {
                 if (_batch_fitness(i) > _archive_fit(best_i))
                     _new_rank[i] = best_i;
             });
+
             // apply the new ranks
             for (int i = 0; i < Params::batch_size; ++i) {
                 if (_new_rank[i] != -1) {
                     _archive.row(_new_rank[i]) = _batch.row(i);
                     _archive_fit(_new_rank[i]) = _batch_fitness(i);
+                    _filled_ranks.push_back(_new_rank[i]);
                 }
             }
+
+            // we stop the infill when we have enough cells filled
+            int c = (_archive_fit.array() > -std::numeric_limits<S>::max()).count();
+            _first = (c < Params::infill_pct * _archive.rows());
         }
 
     protected:
         // to make it easy to switch between parallel and non-parallel
         template <typename F>
-        inline void _loop(size_t begin, size_t end, const F& f)
+        inline void
+        _loop(size_t begin, size_t end, const F& f)
         {
 #ifdef USE_TBB
             tbb::parallel_for(size_t(begin), end, size_t(1), [&](size_t i) {
@@ -114,19 +142,27 @@ namespace map_elites {
 #endif
         }
         // random in [0,1] (Eigen is in [-1,1])
-        template<typename M>
-        inline M _rand() const {
+        template <typename M>
+        inline M _rand() const
+        {
             return 0.5 * (M::Random().array() + 1.);
         }
+
+        // true when we are still at the infill stage
+        bool _first = true;
+
         // our main data
-        centroids_t _centroids;
-        archive_t _archive;
+        centroids_t _centroids = _rand<centroids_t>();
+        archive_t _archive = _rand<archive_t>();
         archive_fit_t _archive_fit = archive_fit_t::Constant(-std::numeric_limits<S>::max());
+
+        // internal list of filled cells
+        std::vector<int> _filled_ranks;
 
         // batch
         using batch_t = Eigen::Matrix<S, Params::batch_size, Params::dim_search_space, Eigen::RowMajor>;
         using batch_fit_t = Eigen::Vector<S, Params::batch_size>;
-        using batch_features_t = Eigen::Matrix<S, Params::batch_size, Params::dim_features,  Eigen::RowMajor>;
+        using batch_features_t = Eigen::Matrix<S, Params::batch_size, Params::dim_features, Eigen::RowMajor>;
         using fit_functions_t = std::array<Fit, Params::batch_size>;
         using batch_ranks_t = Eigen::Vector<int, Params::batch_size * 2>;
         using new_rank_t = Eigen::Vector<int, Params::batch_size>;
@@ -139,10 +175,12 @@ namespace map_elites {
         new_rank_t _new_rank;
 
         // random
+        using uint_dist_param_t = std::uniform_int_distribution<>::param_type;
         std::random_device _rand_device;
         std::default_random_engine _r_gen{_rand_device()};
-        std::uniform_int_distribution<int> _rand_int{0, Params::num_cells - 1};
+        std::uniform_int_distribution<int> _rand_rank;
         std::normal_distribution<> _gaussian{0, 1};
+
     };
 
 } // namespace map_elites
