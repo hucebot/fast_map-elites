@@ -50,7 +50,9 @@ namespace map_elites {
                 for (int i = 0; i < _centroids.rows(); ++i)
                     for (int j = 0; j < _centroids.cols(); ++j)
                         _centroids(i, j) = rand(gen);
+
 #endif // otherwise we already have random centroids
+               // _centroids = _rand_mitchell<centroids_t>();
             }
             _filled_ids.reserve(Params::num_cells);
         }
@@ -147,6 +149,27 @@ namespace map_elites {
         inline M _rand() const
         {
             return 0.5 * (M::Random().array() + 1.);
+        }
+
+        template <typename M>
+        inline M _rand_mitchell(size_t max_samples = 10) const {
+            using row_t = Eigen::Matrix<S, 1, Eigen::internal::traits<M>::ColsAtCompileTime>;
+            M res;
+            row_t new_point; // will store the new points
+
+            res.row(0) = _rand<row_t>();
+            for (size_t i = 1; i < Params::num_cells; ++i) {
+                double best_d = -std::numeric_limits<S>::max();
+                for (size_t j = 0; j < std::min(i, max_samples); ++j) {
+                    new_point =  _rand<row_t>();
+                    double d = (res.topRows(i).rowwise()- new_point).rowwise().squaredNorm().minCoeff();
+                    if (d > best_d) {
+                        res.row(i) = new_point;
+                        best_d = d;
+                    }
+                }
+            }
+            return res;
         }
 
 

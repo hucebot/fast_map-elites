@@ -29,9 +29,9 @@ struct Params {
     static constexpr double sigma_2 = 0.01;
     static constexpr double infill_pct = 0.2;
     static constexpr bool verbose = false;
-    static constexpr bool grid = true;
+    static constexpr bool grid = false;
     static constexpr int grid_size = 64;
-    static constexpr int num_cells = grid ? grid_size * grid_size : 12000; // 12000; // 8192;
+    static constexpr int num_cells = grid ? grid_size * grid_size : 12000;// 12000; // 12000; // 8192;
 };
 
 int main()

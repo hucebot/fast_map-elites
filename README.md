@@ -19,4 +19,6 @@ And it is good to have implementations that are not wasteful when possible!
 - Bounce back operator: Nordmoen J, Nygaard TF, Samuelsen E, Glette K. On restricting real-valued genotypes in evolutionary algorithms. InInternational Conference on the Applications of Evolutionary Computation (Part of EvoStar) 2021 Apr 7 (pp. 3-16). Springer, Cham.
 
 ## Compilation:
-- `clang++  -DUSE_BOOST -DUSE_TBB  -ffast-math  -O3 -march=native -std=c++14 -I /usr/local/include/eigen3 map_elites.cpp -o map_elites_2 -ltbb`
+- `clang++  -DUSE_BOOST -DUSE_TBB  -ffast-math  -O3 -march=native -std=c++14 -I /usr/local/include/eigen3 map_elites.cpp -o map_elites -ltbb`
+- `-DUSE_BOOST`: use Sobol centroids instead of random centroids (this requires boost installed)
+- `-DUSE_TBB`: use TBB for multithreading (this is slightly slower in many cases!)
