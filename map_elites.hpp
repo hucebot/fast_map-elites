@@ -52,7 +52,7 @@ namespace map_elites {
                         _centroids(i, j) = rand(gen);
 
 #endif // otherwise we already have random centroids
-               // _centroids = _rand_mitchell<centroids_t>();
+                _centroids = _rand_mitchell<centroids_t>();
             }
             _filled_ids.reserve(Params::num_cells);
         }
