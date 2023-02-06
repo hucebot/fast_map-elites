@@ -151,6 +151,7 @@ namespace map_elites {
             return 0.5 * (M::Random().array() + 1.);
         }
 
+        //  Mitchell’s Best-Candidate Algorithm
         template <typename M>
         inline M _rand_mitchell(size_t max_samples = 10) const {
             using row_t = Eigen::Matrix<S, 1, Eigen::internal::traits<M>::ColsAtCompileTime>;
