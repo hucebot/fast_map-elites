@@ -108,8 +108,21 @@ namespace map_elites {
                 else {
                     (_centroids.rowwise() - _batch_features.row(i)).rowwise().squaredNorm().minCoeff(&best_i);
                 }
+                std::cout<<"i:"<<i<<" " << _batch_fitness.size() <<" "<<_archive_fit.size() << " " << _new_id.size() << std::endl;
+                std::cout<<"t1:"<<_batch_fitness(i)<<std::endl;
+                std::cout<<std::endl;
+                std::cout<<"t2:"<< _archive_fit(best_i)<<std::endl;
+                std::cout<<std::endl;
+
+                std::cout<<"new_id:"<<_new_id<<std::endl;
+                std::cout<<std::endl;
+
+                std::cout<<"t3:"<<_new_id[i] << std::endl;
+
                 if (_batch_fitness(i) > _archive_fit(best_i))
                     _new_id[i] = best_i;
+
+                std::cout<<"---"<<std::endl;
             });
 
             // apply the new ids
