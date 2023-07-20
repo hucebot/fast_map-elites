@@ -21,6 +21,9 @@ struct FitArm {
     }
 };
 
+
+
+
 struct Params {
     static constexpr int dim_features = 2;
     static constexpr int dim_search_space = 10;

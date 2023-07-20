@@ -32,8 +32,9 @@ namespace map_elites {
         using archive_t = Eigen::Matrix<S, Params::num_cells, Params::dim_search_space, Eigen::RowMajor>;
         using archive_fit_t = Eigen::Vector<S, Params::num_cells>;
 
-        MapElites()
+        MapElites(const Fit& fit=Fit())
         {
+            set_fit_function(fit);
             if (Params::grid) {
                 assert(Params::dim_features == 2);
                 for (int i = 0; i < Params::grid_size; ++i)
@@ -55,16 +56,36 @@ namespace map_elites {
             _filled_ids.reserve(Params::num_cells);
         }
 
+        // make map_elites ready to relaunch!
+        void reset() {
+            _filled_ids.clear();
+            _infill = true;
+            if (!Params::grid)
+                 _centroids = _rand<centroids_t>();
+            // this should not be necessary
+            //_archive = _rand<archive_t>();
+
+        }
+
+        void set_fit_function(const Fit& fit) { 
+            for (int i = 0; i < _fit_functions.size(); ++i)
+                _fit_functions[i] = fit;
+        }
+        
         const archive_t& archive() const { return _archive; }
         const archive_fit_t& archive_fit() const { return _archive_fit; }
         const centroids_t& centroids() const { return _centroids; }
+        const std::vector<int>& filled_ids() const { return _filled_ids; }
+        
         double qd_score() const
         {
             double qd = 0;
-            for (int i = 0; i < Params::num_cells; ++i)
-                if (_archive_fit(i) != -std::numeric_limits<S>::max())
-                    qd += _archive_fit(i);
+            for (int i = 0; i < _filled_ids.size(); ++i)
+                qd += _archive_fit(_filled_ids[i]);
             return qd;
+        }
+        double coverage() const {
+            return _filled_ids.size();            
         }
 
         void step()
@@ -134,13 +155,16 @@ namespace map_elites {
         _loop(size_t begin, size_t end, const F& f)
         {
 #ifdef USE_TBB
+            if (Params::parallel) {
             tbb::parallel_for(size_t(begin), end, size_t(1), [&](size_t i) {
                 f(i);
             });
-#else
+            } else
+#endif
+           {
             for (size_t i = begin; i < end; ++i)
                 f(i);
-#endif
+           }
         }
         // random in [0,1] (Eigen is in [-1,1])
         template <typename M>
