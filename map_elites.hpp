@@ -63,7 +63,7 @@ namespace map_elites {
             if (!Params::grid)
                  _centroids = _rand<centroids_t>();
             // this should not be necessary
-            //_archive = _rand<archive_t>();
+            _archive = _rand<archive_t>();
 
         }
 
@@ -76,7 +76,7 @@ namespace map_elites {
         const archive_fit_t& archive_fit() const { return _archive_fit; }
         const centroids_t& centroids() const { return _centroids; }
         const std::vector<int>& filled_ids() const { return _filled_ids; }
-        
+
         double qd_score() const
         {
             double qd = 0;

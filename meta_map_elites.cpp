@@ -54,15 +54,15 @@ struct FitFunction { // describe generic composition of functions
 
         for (size_t i = 0; i < Params::dim_search_space; ++i)
             for (size_t j = 0; j < Params::layer_1; ++j)
-                _weights_in_to_1(i, j) = func_spec[k++] * 0.5 - 1.0;
+                _weights_in_to_1(i, j) = func_spec[k++] * 2.0 - 1.0;
 
         for (size_t i = 0; i < Params::layer_1; ++i)
             for (size_t j = 0; j < Params::layer_2; ++j)
-                _weights_1_to_2(i, j) = func_spec[k++] * 0.5 - 1.0;
+                _weights_1_to_2(i, j) = func_spec[k++] * 2.0 - 1.0;
 
         for (size_t i = 0; i < Params::layer_2; ++i)
             for (size_t j = 0; j < (1 + Params::dim_features); ++j)
-                _weights_2_to_out(i, j) = func_spec[k++] * 0.5 - 1.0;
+                _weights_2_to_out(i, j) = func_spec[k++] * 2.0 - 1.0;
     }
 
     const features_t& eval(const indiv_t& v, S& fit)
@@ -148,8 +148,10 @@ struct FitMapElites {
             double d = (map_elites.archive_fit()[map_elites.filled_ids()[i]] - mean);
             std += d * d;
         }
-        std = sqrt(std / map_elites.filled_ids().size());
-
+        if (map_elites.filled_ids().size() > 0)
+            std = sqrt(std / map_elites.filled_ids().size());
+        else
+            std = 0;
         fit = std * map_elites.coverage(); // todo : coverage * std_deviation
         // time to reach 95% of best value
         for (int j = 0; j < _features.cols(); ++j)
@@ -172,7 +174,7 @@ struct Params {
     static constexpr int batch_size = 128;
     static constexpr double sigma_1 = 0.15;
     static constexpr double sigma_2 = 0.01;
-    static constexpr double infill_pct = 0.2;
+    static constexpr double infill_pct = 0.1;
     static constexpr bool verbose = false;
     static constexpr bool grid = true;
     static constexpr bool parallel = false;
@@ -187,7 +189,7 @@ struct MetaParams {
     static constexpr int nb_iterations = 100000 / batch_size;
     static constexpr double sigma_1 = 0.15;
     static constexpr double sigma_2 = 0.01;
-    static constexpr double infill_pct = 0.2;
+    static constexpr double infill_pct = 0.1;
     static constexpr bool verbose = true;
     static constexpr bool grid = true;
     static constexpr bool parallel = true;
@@ -201,20 +203,16 @@ int main()
     using map_elites_t = map_elites::MapElites<MetaParams, fit_t>;
 
     auto start = std::chrono::high_resolution_clock::now();
-    fit_t fit;
-    fit_t::indiv_t x =  0.5 * (fit_t::indiv_t::Random().array() + 1.0);
-    double y;
-    fit.eval(x, y);
     std::cout << "creating meta map-elites, search space=" << MetaParams::dim_search_space << std::endl;
-    auto map_elites = std::make_unique<map_elites_t>(); // put on heap and not on stack!
+    auto map_elites = std::make_unique<map_elites_t>(); // put on heap and not on stack! (otherwise segv)
     std::cout << "starting meta map-elites" << std::endl;
     std::ofstream qd_ofs("qd.dat");
 
-    for (size_t i = 0; i < 2000/*1e6 / Params::batch_size*/; ++i) {
+    for (size_t i = 0; i < 350/*1e6 / Params::batch_size*/; ++i) {
         map_elites->step();
         qd_ofs << i * Params::batch_size << " " << map_elites->qd_score() << std::endl;
         if (MetaParams::verbose)
-            std::cout << i << " ";
+            std::cout << map_elites->coverage() << "[" << i << "] ";
         std::cout.flush();
     }
     auto end = std::chrono::high_resolution_clock::now();
@@ -229,5 +227,19 @@ int main()
     std::ofstream f("fit.dat");
     f << map_elites->archive_fit() << std::endl;
     std::cout << "done" << std::endl;
+   
+    // write the final result
+    std::ofstream all_fit("all_fit.dat");
+    for (int i = 0; i < map_elites->filled_ids().size(); ++i)
+    {
+        int id = map_elites->filled_ids()[i];
+        FitMapElites<Params, MetaParams> fit;
+        double f = 0;
+        fit.eval(map_elites->archive().row(id), f);
+        std::ofstream ofs("data/res_" + std::to_string(id) + ".dat");
+        ofs << fit.map_elites.archive_fit();
+        all_fit << id << " " << f << std::endl;
+
+    }
     return 0;
 }
