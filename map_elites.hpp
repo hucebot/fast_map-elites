@@ -32,7 +32,7 @@ namespace map_elites {
         using archive_t = Eigen::Matrix<S, Params::num_cells, Params::dim_search_space, Eigen::RowMajor>;
         using archive_fit_t = Eigen::Vector<S, Params::num_cells>;
 
-        MapElites(const Fit& fit=Fit())
+        MapElites(const Fit& fit = Fit())
         {
             set_fit_function(fit);
             if (Params::grid) {
@@ -57,21 +57,22 @@ namespace map_elites {
         }
 
         // make map_elites ready to relaunch!
-        void reset() {
+        void reset()
+        {
             _filled_ids.clear();
             _infill = true;
             if (!Params::grid)
-                 _centroids = _rand<centroids_t>();
+                _centroids = _rand<centroids_t>();
             // this should not be necessary
             _archive = _rand<archive_t>();
-
         }
 
-        void set_fit_function(const Fit& fit) { 
+        void set_fit_function(const Fit& fit)
+        {
             for (int i = 0; i < _fit_functions.size(); ++i)
                 _fit_functions[i] = fit;
         }
-        
+
         const archive_t& archive() const { return _archive; }
         const archive_fit_t& archive_fit() const { return _archive_fit; }
         const centroids_t& centroids() const { return _centroids; }
@@ -84,8 +85,9 @@ namespace map_elites {
                 qd += _archive_fit(_filled_ids[i]);
             return qd;
         }
-        double coverage() const {
-            return _filled_ids.size();            
+        double coverage() const
+        {
+            return _filled_ids.size();
         }
 
         void step()
@@ -96,21 +98,23 @@ namespace map_elites {
             else { // normal loop
                 // selection
                 for (int i = 0; i < Params::batch_size * 2; ++i) // fill with random id of of filled cells
-                    _batch_ids[i] = _filled_ids[_rand_id(_r_gen, uint_dist_param_t(0, _filled_ids.size()-1))];
+                    _batch_ids[i] = _filled_ids[_rand_id(_r_gen, uint_dist_param_t(0, _filled_ids.size() - 1))];
 
                 // variation
-                for (int i = 0; i < Params::batch_size; ++i) // line variation
-                    _batch.row(i) = _archive.row(_batch_ids[i * 2]) + Params::sigma_1 * _gaussian(_r_gen) * (_archive.row(_batch_ids[i * 2]) - _archive.row(_batch_ids[i * 2 + 1]));
-                for (int i = 0; i < Params::batch_size; ++i) // gaussian mutation with bounce back
-                    for (int j = 0; j < Params::dim_search_space; ++j) {
-                        // bounce does not seem to change much, but it's not worse than a simple cap
-                        double r = _gaussian(_r_gen) * Params::sigma_2;
-                        _batch(i, j) = _batch(i, j) + r;
-                        _batch(i, j) += _batch(i, j) > 1 ? (1 - _batch(i, j)) * 2 : 0;
-                        _batch(i, j) += _batch(i, j) < 0 ? -_batch(i, j) * 2 : 0;
-                        assert(_batch(i, j) >= 0 && "Params::sigma_2 too large!");
-                        assert(_batch(i, j) <= 1 && "Params::sigma_2 too large!");
-                    }
+                //    for (int i = 0; i < Params::batch_size; ++i) // line variation
+
+                for (int i = 0; i < Params::batch_size; ++i) { // gaussian mutation
+                    double pm = (double)rand() / (double)RAND_MAX;
+                    _batch.row(i) = _archive.row(_batch_ids[i * 2]);
+                    // line operator (cross-over like)
+                    if (pm > 0.5)
+                        _batch.row(i) += Params::sigma_1 * _gaussian(_r_gen) * (_archive.row(_batch_ids[i * 2]) - _archive.row(_batch_ids[i * 2 + 1]));
+                    if ((pm <= 0.5) || ((double)rand() / (double)RAND_MAX > 0.5)) // we always add this mutation if no line mutation, otherwise, 50% chance of having both
+                        for (int j = 0; j < Params::dim_search_space; ++j)
+                            _batch(i, j) = _batch(i, j) + _gaussian(_r_gen) * Params::sigma_2;
+                    // keep in [0,1]
+                    _batch.row(i) = _batch.row(i).cwiseMin(1).cwiseMax(0);
+                }
             }
 
             _loop(0, Params::batch_size, [&](int i) { // evaluate the batch
@@ -156,15 +160,16 @@ namespace map_elites {
         {
 #ifdef USE_TBB
             if (Params::parallel) {
-            tbb::parallel_for(size_t(begin), end, size_t(1), [&](size_t i) {
-                f(i);
-            });
-            } else
+                tbb::parallel_for(size_t(begin), end, size_t(1), [&](size_t i) {
+                    f(i);
+                });
+            }
+            else
 #endif
-           {
-            for (size_t i = begin; i < end; ++i)
-                f(i);
-           }
+            {
+                for (size_t i = begin; i < end; ++i)
+                    f(i);
+            }
         }
         // random in [0,1] (Eigen is in [-1,1])
         template <typename M>
@@ -172,7 +177,6 @@ namespace map_elites {
         {
             return 0.5 * (M::Random().array() + 1.);
         }
-
 
         // our main data
         centroids_t _centroids = _rand<centroids_t>();

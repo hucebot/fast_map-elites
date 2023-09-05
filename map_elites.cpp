@@ -23,13 +23,12 @@ struct FitArm {
 
 
 
-
 struct Params {
     static constexpr int dim_features = 2;
     static constexpr int dim_search_space = 10;
     static constexpr int batch_size = 128;
     static constexpr double sigma_1 = 0.15;
-    static constexpr double sigma_2 = 0.01;
+    static constexpr double sigma_2 = 0.05;
     static constexpr double infill_pct = 0.2;
     static constexpr bool verbose = false;
     static constexpr bool grid = true;

@@ -132,7 +132,10 @@ def plot_cvt(ax, centroids, fit, min_fit, max_fit):
        # index = q[1][0][0]
         region = regions[i]
         polygon = vertices[region]
-        ax.fill(*zip(*polygon), alpha=0.9, color=my_cmap(norm(fit[i])))
+        if fit[i] < min_fit:
+            ax.fill(*zip(*polygon), alpha=0.9, color='black')
+        else:
+            ax.fill(*zip(*polygon), alpha=0.9, color=my_cmap(norm(fit[i])))
         k += 1
         if k % 100 == 0:
             print(k, end=" ", flush=True)
