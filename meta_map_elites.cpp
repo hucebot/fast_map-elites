@@ -153,6 +153,7 @@ struct FitMapElites {
     using indiv_t = Eigen::Matrix<S, 1, MetaParams::dim_search_space, Eigen::RowMajor>;
     using features_t = Eigen::Matrix<S, 1, MetaParams::dim_features, Eigen::RowMajor>;
     using features_time_t = Eigen::Matrix<S, MetaParams::nb_iterations, MetaParams::dim_features, Eigen::RowMajor>;
+
     features_t _features;
     features_t _max_features;
     features_time_t _features_time;
@@ -198,15 +199,47 @@ struct FitMapElites {
         else
             std = 0;
         fit = std * map_elites.coverage(); // coverage * std_deviation
-        // time to reach 95% of best value
 
-        // TODO use log
+        // time to reach 95% of best value
         for (int j = 0; j < _features.cols(); ++j)
             for (int i = 0; _features_time(i, j) < 0.99 * _max_features(j) && i + 1 < _features_time.rows(); ++i)
                 _features[j] = i;
-        _features = _features / _features_time.rows();
+                 _features = _features / _features_time.rows();
 
-       // std::cout<<"fit:"<<fit<<" features:"<<_features<<std::endl;
+        // shape of the hypervolume
+        double spread = 0;
+        double similarity = 0;
+        double distance = 0;
+        for (int i = 0; i < map_elites.filled_ids().size(); ++i) {
+            double m = 1e10;
+            for (int j = 0; j < map_elites.filled_ids().size(); ++j) {
+                distance = (map_elites.archive().row(map_elites.filled_ids()[i]) - map_elites.archive().row(map_elites.filled_ids()[j])).norm();
+                similarity += distance;
+                if (i != j)
+                    m = std::min(m, distance);
+            }
+            spread += m;
+        }
+        similarity /= map_elites.filled_ids().size() * map_elites.filled_ids().size();
+        spread /= map_elites.filled_ids().size();
+        _features[0] = similarity;
+        _features[1] = spread;
+        if (std::isnan(_features[0]) || std::isnan(_features[1])) {
+            _features[0] = 0.0;
+            _features[1] = 0.0;
+        }
+        //std::cout<<"fit:"<<fit<<" features:"<<_features<<std::endl;
+
+        // derivative
+        //  for (int j = 0; j < _features.cols(); ++j){
+        //     _features[j] = 0;
+        //     for (int i = 1;  i < _features_time.rows(); ++i)
+        //         _features[j] = std::max(_features[j], (_features_time(i, j) - _features_time(i - 1, j)) / _max_features(j));
+        //  }
+         _features = (_features).cwiseMin(1.0).cwiseMax(0.0);
+        //std::cout<<"fit:"<<fit<<" features:"<<_features<<" " << _features_time.rows()<< " "<<std::isnan(_features[0]) << std::endl;
+        assert(!isnan(_features[0]));
+        assert(!isnan(_features[1]));
         assert(_features.minCoeff() >= 0);
         assert(_features.maxCoeff() <= 1.0);
         return _features;
@@ -281,7 +314,7 @@ int main()
     std::cout << "starting meta map-elites" << std::endl;
     std::ofstream qd_ofs("qd.dat");
 
-    for (size_t i = 0; i < 2000 /*1e6 / Params::batch_size*/; ++i) {
+    for (size_t i = 0; i < 50 /*1e6 / Params::batch_size*/; ++i) {
         map_elites->step();
         qd_ofs << i * Params::batch_size << " " << map_elites->qd_score() << std::endl;
         if (MetaParams::verbose)
@@ -293,7 +326,7 @@ int main()
 
     std::cout << "Total time:" << t / 1000.0 << "s" << std::endl;
 
-    std::cout << "writing...";
+    std::cout << "writing result...";
     std::cout.flush();
     std::ofstream c("centroids.dat");
     c << map_elites->centroids() << std::endl;
@@ -305,8 +338,10 @@ int main()
 
     // write the final result
     std::ofstream all_fit("all_fit.dat");
+    std::cout << "writing features...";
     for (int i = 0; i < map_elites->filled_ids().size(); ++i) {
         int id = map_elites->filled_ids()[i];
+        std::cout << id << " "; std::cout.flush();
         FitMapElites<Params, MetaParams> fit;
         double f = 0;
         auto features = fit.eval(map_elites->archive().row(id), f);
@@ -322,7 +357,7 @@ int main()
         // }
         ofs << fit.map_elites.archive_fit();
         ofs_features << fit._features_time << std::endl;
-        all_fit << id << " " << f << " " << features << std::endl;
+        all_fit << id << " " << f << " " << features << " " << map_elites->archive_fit()[id] << std::endl;
     }
     return 0;
 }

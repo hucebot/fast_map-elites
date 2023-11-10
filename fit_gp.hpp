@@ -91,7 +91,7 @@ namespace meta_mapelites {
                     _features[j] = i;
             _features = _features / _features_time.rows();
 
-            // std::cout<<"fit:"<<fit<<" features:"<<_features<<std::endl;
+            std::cout<<"fit:"<<fit<<" features:"<<_features<<std::endl;
             assert(_features.minCoeff() >= 0);
             assert(_features.maxCoeff() <= 1.0);
             return _features;
