@@ -8,7 +8,6 @@
 #include "map_elites.hpp"
 #include "ugp.hpp"
 
-
 // alternative : INDUCTION POINTS !
 template <typename Params, typename S = double>
 struct FitFunction { // describe generic composition of functions
@@ -147,8 +146,9 @@ struct FitGP {
         return _features;
     }
 };
+std::ofstream ofs_temp("fit_track.dat");
 
-template <typename Params, typename MetaParams, typename S = double>
+template <typename Params, typename ParamsRandom, typename MetaParams, typename S = double>
 struct FitMapElites {
     using indiv_t = Eigen::Matrix<S, 1, MetaParams::dim_search_space, Eigen::RowMajor>;
     using features_t = Eigen::Matrix<S, 1, MetaParams::dim_features, Eigen::RowMajor>;
@@ -164,9 +164,11 @@ struct FitMapElites {
     using fit_t = FitGP<Params>;
 #endif
     using map_elites_t = map_elites::MapElites<Params, fit_t>;
+    using random_elites_t = map_elites::MapElites<ParamsRandom, fit_t>;
 
-    map_elites_t map_elites;
     fit_t fit_function;
+    // typename fit_t::indiv_t center = fit_t::indiv_t::Ones() * 0.5;
+    indiv_t center = (indiv_t::Ones() * 0.5).normalized();
 
     FitMapElites() {}
     FitMapElites(const FitMapElites&) {}
@@ -174,14 +176,29 @@ struct FitMapElites {
 
     const features_t& eval(const indiv_t& v, S& fit)
     {
-        map_elites.reset();
-        fit_function.set(v);
-        map_elites.set_fit_function(fit_function);
 
+        map_elites_t map_elites;
+        random_elites_t random_elites;
+        fit_function.set(v);
+        // random
+        random_elites.reset();
+        random_elites.set_fit_function(fit_function);
+        int conv_random = _features_time.rows();
+        for (int i = 0; i < _features_time.rows(); ++i) {
+            random_elites.step();
+            if (random_elites.num_last_added == 0)
+                conv_random = std::min(conv_random, i);
+        }
+        // map-elites
+        map_elites.reset();
+        map_elites.set_fit_function(fit_function);
+        int conv = _features_time.rows();
         for (int i = 0; i < _features_time.rows(); ++i) {
             map_elites.step();
-            _features_time(i, 0) = map_elites.archive_fit().maxCoeff();
+            _features_time(i, 0) = map_elites.num_last_added; // map_elites.archive_fit().maxCoeff();
             _features_time(i, 1) = map_elites.coverage();
+            if (map_elites.num_last_added == 0)
+                conv = std::min(conv, i);
         }
         _max_features = _features_time.row(_features_time.rows() - 1);
 
@@ -198,46 +215,74 @@ struct FitMapElites {
             std = sqrt(std / map_elites.filled_ids().size());
         else
             std = 0;
-        fit = std * map_elites.coverage(); // coverage * std_deviation
 
-        // time to reach 95% of best value
-        for (int j = 0; j < _features.cols(); ++j)
-            for (int i = 0; _features_time(i, j) < 0.99 * _max_features(j) && i + 1 < _features_time.rows(); ++i)
-                _features[j] = i;
-                 _features = _features / _features_time.rows();
+        double me_mean = 0;
+        for (int i = 0; i < map_elites.filled_ids().size(); ++i)
+            me_mean += map_elites.archive_fit()[map_elites.filled_ids()[i]];
+        me_mean /= map_elites.filled_ids().size();
+
+        double re_mean = 0;
+        for (int i = 0; i < random_elites.filled_ids().size(); ++i)
+            re_mean += random_elites.archive_fit()[random_elites.filled_ids()[i]];
+        re_mean /= random_elites.filled_ids().size();
 
         // shape of the hypervolume
-        double spread = 0;
-        double similarity = 0;
-        double distance = 0;
-        for (int i = 0; i < map_elites.filled_ids().size(); ++i) {
-            double m = 1e10;
-            for (int j = 0; j < map_elites.filled_ids().size(); ++j) {
-                distance = (map_elites.archive().row(map_elites.filled_ids()[i]) - map_elites.archive().row(map_elites.filled_ids()[j])).norm();
-                similarity += distance;
-                if (i != j)
-                    m = std::min(m, distance);
-            }
-            spread += m;
-        }
-        similarity /= map_elites.filled_ids().size() * map_elites.filled_ids().size();
-        spread /= map_elites.filled_ids().size();
-        _features[0] = similarity;
-        _features[1] = spread;
-        if (std::isnan(_features[0]) || std::isnan(_features[1])) {
+        // double spread = 0;
+        // double similarity = 0;
+        // double distance = 0;
+        // double d_to_center = 0;
+        // for (int i = 0; i < map_elites.filled_ids().size(); ++i) {
+        //     double m = 1e10;
+        //     for (int j = 0; j < map_elites.filled_ids().size(); ++j) {
+        //         distance = (map_elites.archive().row(map_elites.filled_ids()[i]) - map_elites.archive().row(map_elites.filled_ids()[j])).norm();
+        //         similarity += distance;
+        //         if (i != j)
+        //             m = std::min(m, distance);
+        //     }
+        //     //std::cout<<"map_elites.archive().row(map_elites.filled_ids()[i]).rows()"<<map_elites.archive().row(map_elites.filled_ids()[i]).rows()<<" "<<map_elites.archive().row(map_elites.filled_ids()[i]).cols()<<"   vs" << center.rows()<<","<<center.cols()<<std::endl;
+        //     d_to_center += (map_elites.archive().row(map_elites.filled_ids()[i]) - center).norm();
+        //     spread += m;
+        // }
+        double div = 0;
+
+        // TODO : replace spread by min/max of elites ? too similar to mean distance?
+        // average distance to the mean & std deviation ? to evaluate the spreaad
+        // similarity /= map_elites.filled_ids().size() * map_elites.filled_ids().size();
+        // spread /= map_elites.filled_ids().size();
+        // d_to_center /= map_elites.filled_ids().size();
+
+#ifdef FEATURES_RAND_FIT_COVERAGE
+        _features[0] = (double)random_elites.coverage() / double(map_elites.coverage());
+        _features[1] = (double)re_mean / me_mean;
+        fit = std * map_elites.coverage(); // coverage * std_deviation
+#elif defined(FEATURES_CONV_FIT_RAND)
+        // time to reach 95% of best value
+        for (int j = 0; j < _features.cols(); ++j)
+            for (int i = 0; _features_time(i, j) < 0.95 * _max_features(j) && i + 1 < _features_time.rows(); ++i)
+                _features[j] = i;
+        _features /= _features_time.rows();
+        fit = map_elites.qd_score() - random_elites.qd_score();
+#else
+#error "No fitness / features defined"
+#endif
+        // keep feature 0 as coverage
+        //_features[1] = d_to_center;
+        if (std::isnan(_features[0]) || std::isnan(_features[1])
+            || std::isinf(_features[0])
+            || std::isinf(_features[1])) {
             _features[0] = 0.0;
             _features[1] = 0.0;
         }
-        //std::cout<<"fit:"<<fit<<" features:"<<_features<<std::endl;
-
+        //  std::cout<<"fit:"<<fit<<" features:"<<_features<<" Cov:"<< random_elites.coverage() << " " << map_elites.coverage() << " m:"<< re_mean << " " << me_mean << std::endl;
+        // ofs_temp << fit << std::endl;
         // derivative
         //  for (int j = 0; j < _features.cols(); ++j){
         //     _features[j] = 0;
         //     for (int i = 1;  i < _features_time.rows(); ++i)
         //         _features[j] = std::max(_features[j], (_features_time(i, j) - _features_time(i - 1, j)) / _max_features(j));
         //  }
-         _features = (_features).cwiseMin(1.0).cwiseMax(0.0);
-        //std::cout<<"fit:"<<fit<<" features:"<<_features<<" " << _features_time.rows()<< " "<<std::isnan(_features[0]) << std::endl;
+        _features = (_features).cwiseMin(1.0).cwiseMax(0.0);
+        // std::cout<<"fit:"<<fit<<" features:"<<_features<<" " << _features_time.rows()<< " "<<std::isnan(_features[0]) << std::endl;
         assert(!isnan(_features[0]));
         assert(!isnan(_features[1]));
         assert(_features.minCoeff() >= 0);
@@ -256,12 +301,32 @@ struct Params {
     static constexpr int batch_size = 64;
     static constexpr double sigma_1 = 0.15;
     static constexpr double sigma_2 = 0.01;
-    static constexpr double infill_pct = 0.1;
+    static constexpr double infill_pct = 0.05;
     static constexpr bool verbose = false;
     static constexpr bool grid = true;
     static constexpr bool parallel = false;
     static constexpr int grid_size = 64;
     static constexpr int num_cells = grid ? grid_size * grid_size : 12000; // 12000; // 8192;
+    static constexpr double min_fit = -1e10;
+};
+
+struct ParamsRandom {
+    static constexpr int layer_1 = 3;
+    static constexpr int layer_2 = 4;
+    static constexpr int gp_num_points = 20;
+
+    static constexpr int dim_features = 2;
+    static constexpr int dim_search_space = 5;
+    static constexpr int batch_size = 64;
+    static constexpr double sigma_1 = 0.15;
+    static constexpr double sigma_2 = 0.05;
+    static constexpr double infill_pct = -1; // we always infill, no evolution
+    static constexpr bool verbose = false;
+    static constexpr bool grid = true;
+    static constexpr bool parallel = false;
+    static constexpr int grid_size = 64;
+    static constexpr int num_cells = grid ? grid_size * grid_size : 12000; // 12000; // 8192;
+    static constexpr double min_fit = -1e10;
 };
 
 struct MetaParams {
@@ -274,13 +339,14 @@ struct MetaParams {
     static constexpr int batch_size = 64;
     static constexpr int nb_iterations = 100000 / batch_size;
     static constexpr double sigma_1 = 0.15;
-    static constexpr double sigma_2 = 0.01;
-    static constexpr double infill_pct = 0.01;
+    static constexpr double sigma_2 = 0.001; // bigger?
+    static constexpr double infill_pct = 0.02;
     static constexpr bool verbose = true;
     static constexpr bool grid = true;
     static constexpr bool parallel = true;
     static constexpr int grid_size = 64;
     static constexpr int num_cells = grid ? grid_size * grid_size : 12000; // 12000; // 8192;
+    static constexpr double min_fit = 1;
 };
 
 int main()
@@ -305,7 +371,7 @@ int main()
     // double tt = std::chrono::duration_cast<std::chrono::milliseconds>(end_gp - start_gp).count();
     // std::cout << "GP time:" << tt / 1000.0 << "s" << std::endl;
 
-    using fit_t = FitMapElites<Params, MetaParams>;
+    using fit_t = FitMapElites<Params, ParamsRandom, MetaParams>;
     using map_elites_t = map_elites::MapElites<MetaParams, fit_t>;
 
     auto start = std::chrono::high_resolution_clock::now();
@@ -314,9 +380,9 @@ int main()
     std::cout << "starting meta map-elites" << std::endl;
     std::ofstream qd_ofs("qd.dat");
 
-    for (size_t i = 0; i < 50 /*1e6 / Params::batch_size*/; ++i) {
+    for (size_t i = 0; i < 1000 /*1e6 / Params::batch_size*/; ++i) {
         map_elites->step();
-        qd_ofs << i * Params::batch_size << " " << map_elites->qd_score() << std::endl;
+        qd_ofs << i * Params::batch_size << " " << map_elites->qd_score() << " " << map_elites->coverage() << std::endl;
         if (MetaParams::verbose)
             std::cout << map_elites->coverage() << "[" << i << "] ";
         std::cout.flush();
@@ -341,8 +407,9 @@ int main()
     std::cout << "writing features...";
     for (int i = 0; i < map_elites->filled_ids().size(); ++i) {
         int id = map_elites->filled_ids()[i];
-        std::cout << id << " "; std::cout.flush();
-        FitMapElites<Params, MetaParams> fit;
+        std::cout << id << " ";
+        std::cout.flush();
+        FitMapElites<Params, ParamsRandom, MetaParams> fit;
         double f = 0;
         auto features = fit.eval(map_elites->archive().row(id), f);
         std::ofstream ofs("data/res_" + std::to_string(id) + ".dat");
@@ -355,7 +422,7 @@ int main()
         //             gpf << fi << " " << fj << " " << fit.fit_function._gps[k].query(p) << std::endl;
         //         }
         // }
-        ofs << fit.map_elites.archive_fit();
+        // ofs << fit.map_elites.archive_fit();
         ofs_features << fit._features_time << std::endl;
         all_fit << id << " " << f << " " << features << " " << map_elites->archive_fit()[id] << std::endl;
     }

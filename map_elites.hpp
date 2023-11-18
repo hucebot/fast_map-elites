@@ -31,6 +31,7 @@ namespace map_elites {
         using centroids_t = Eigen::Matrix<S, Params::num_cells, Params::dim_features, Eigen::RowMajor>;
         using archive_t = Eigen::Matrix<S, Params::num_cells, Params::dim_search_space, Eigen::RowMajor>;
         using archive_fit_t = Eigen::Vector<S, Params::num_cells>;
+        int num_last_added = 0;
 
         MapElites(const Fit& fit = Fit())
         {
@@ -65,6 +66,7 @@ namespace map_elites {
                 _centroids = _rand<centroids_t>();
             // this should not be necessary
             _archive = _rand<archive_t>();
+            // archive_fit?
         }
 
         void set_fit_function(const Fit& fit)
@@ -133,13 +135,15 @@ namespace map_elites {
                 else {
                     (_centroids.rowwise() - _batch_features.row(i)).rowwise().squaredNorm().minCoeff(&best_i);
                 }
-                if (_batch_fitness(i) > _archive_fit(best_i))
+                if (_batch_fitness(i) > _archive_fit(best_i) && _batch_fitness(i)  > Params::min_fit)
                     _new_id[i] = best_i;
             });
 
             // apply the new ids
+            num_last_added = 0;
             for (int i = 0; i < Params::batch_size; ++i) {
                 if (_new_id[i] != -1) {
+                    ++num_last_added;
                     _archive.row(_new_id[i]) = _batch.row(i);
                     if (_archive_fit(_new_id[i]) == -std::numeric_limits<S>::max())
                         _filled_ids.push_back(_new_id[i]);
@@ -148,7 +152,7 @@ namespace map_elites {
             }
 
             // we stop the infill when we have enough cells filled
-            _infill = (_filled_ids.size() < Params::infill_pct * _archive.rows());
+            _infill = (Params::infill_pct  < 0 || _filled_ids.size() < Params::infill_pct * _archive.rows());
             assert(_filled_ids.size() <= Params::num_cells);
         }
 
@@ -185,10 +189,10 @@ namespace map_elites {
 
         // internal list of filled cells
         std::vector<int> _filled_ids;
-
+public:
         // true when we are still at the infill stage
         bool _infill = true;
-
+private:
         // batch
         using batch_t = Eigen::Matrix<S, Params::batch_size, Params::dim_search_space, Eigen::RowMajor>;
         using batch_fit_t = Eigen::Vector<S, Params::batch_size>;
