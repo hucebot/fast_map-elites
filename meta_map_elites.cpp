@@ -165,8 +165,10 @@ struct FitMapElites {
 #endif
     using map_elites_t = map_elites::MapElites<Params, fit_t>;
     using random_elites_t = map_elites::MapElites<ParamsRandom, fit_t>;
-
+    using archive_fit_t = typename map_elites_t::archive_fit_t;
     fit_t fit_function;
+    archive_fit_t final_me_archive;
+    archive_fit_t final_re_archive;
     // typename fit_t::indiv_t center = fit_t::indiv_t::Ones() * 0.5;
     indiv_t center = (indiv_t::Ones() * 0.5).normalized();
 
@@ -255,6 +257,10 @@ struct FitMapElites {
         _features[0] = (double)random_elites.coverage() / double(map_elites.coverage());
         _features[1] = (double)re_mean / me_mean;
         fit = std * map_elites.coverage(); // coverage * std_deviation
+#elif FEATURES_RAND_FIT_QD
+        _features[0] = (double)random_elites.coverage() / double(map_elites.coverage());
+        _features[1] = (double)re_mean / me_mean;
+        fit = map_elites.qd_score() - random_elites.qd_score();
 #elif defined(FEATURES_CONV_FIT_RAND)
         // time to reach 95% of best value
         for (int j = 0; j < _features.cols(); ++j)
@@ -282,6 +288,8 @@ struct FitMapElites {
         //         _features[j] = std::max(_features[j], (_features_time(i, j) - _features_time(i - 1, j)) / _max_features(j));
         //  }
         _features = (_features).cwiseMin(1.0).cwiseMax(0.0);
+        final_me_archive = map_elites.archive_fit();
+        final_re_archive = random_elites.archive_fit();
         // std::cout<<"fit:"<<fit<<" features:"<<_features<<" " << _features_time.rows()<< " "<<std::isnan(_features[0]) << std::endl;
         assert(!isnan(_features[0]));
         assert(!isnan(_features[1]));
@@ -339,14 +347,14 @@ struct MetaParams {
     static constexpr int batch_size = 64;
     static constexpr int nb_iterations = 100000 / batch_size;
     static constexpr double sigma_1 = 0.15;
-    static constexpr double sigma_2 = 0.001; // bigger?
-    static constexpr double infill_pct = 0.02;
+    static constexpr double sigma_2 = 0.01; // bigger?
     static constexpr bool verbose = true;
     static constexpr bool grid = true;
     static constexpr bool parallel = true;
     static constexpr int grid_size = 64;
     static constexpr int num_cells = grid ? grid_size * grid_size : 12000; // 12000; // 8192;
     static constexpr double min_fit = 1;
+    static constexpr double infill_pct = 150. / num_cells; // 0.05;
 };
 
 int main()
@@ -380,12 +388,23 @@ int main()
     std::cout << "starting meta map-elites" << std::endl;
     std::ofstream qd_ofs("qd.dat");
 
-    for (size_t i = 0; i < 1000 /*1e6 / Params::batch_size*/; ++i) {
+    for (size_t i = 0; i < 50 /*1e6 / Params::batch_size*/; ++i) {
         map_elites->step();
         qd_ofs << i * Params::batch_size << " " << map_elites->qd_score() << " " << map_elites->coverage() << std::endl;
         if (MetaParams::verbose)
             std::cout << map_elites->coverage() << "[" << i << "] ";
         std::cout.flush();
+        if (i % 100 == 0) {
+            std::cout << "writing result...";
+            std::cout.flush();
+            std::ofstream c("centroids.dat");
+            c << map_elites->centroids() << std::endl;
+            std::ofstream f("fit.dat");
+            f << map_elites->archive_fit() << std::endl;
+            std::ofstream a("archive.dat");
+            a << map_elites->archive() << std::endl;
+            std::cout << "done" << std::endl;
+        }
     }
     auto end = std::chrono::high_resolution_clock::now();
     double t = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
@@ -412,7 +431,15 @@ int main()
         FitMapElites<Params, ParamsRandom, MetaParams> fit;
         double f = 0;
         auto features = fit.eval(map_elites->archive().row(id), f);
-        std::ofstream ofs("data/res_" + std::to_string(id) + ".dat");
+        {
+            std::ofstream ofs("data/me_fit_" + std::to_string(id) + ".dat");
+            ofs << fit.final_me_archive;
+        }
+        {
+            std::ofstream ofs("data/re_fit_" + std::to_string(id) + ".dat");
+            ofs << fit.final_re_archive;
+        }
+        
         std::ofstream ofs_features("data/features_" + std::to_string(id) + ".dat");
         // for (int k = 0; k < fit.fit_function._gps.size(); ++k) {
         //     std::ofstream gpf("data/gp_" + std::to_string(id) + "_" + std::to_string(k) + ".dat");
@@ -422,7 +449,6 @@ int main()
         //             gpf << fi << " " << fj << " " << fit.fit_function._gps[k].query(p) << std::endl;
         //         }
         // }
-        // ofs << fit.map_elites.archive_fit();
         ofs_features << fit._features_time << std::endl;
         all_fit << id << " " << f << " " << features << " " << map_elites->archive_fit()[id] << std::endl;
     }
