@@ -1,5 +1,6 @@
 #define EIGEN_STACK_ALLOCATION_LIMIT 0
 #include <memory>
+#include <iterator>
 
 #include <Eigen/Cholesky>
 #include <Eigen/Core>
