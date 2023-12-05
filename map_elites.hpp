@@ -91,7 +91,9 @@ namespace map_elites {
         {
             return _filled_ids.size();
         }
-
+        double mean() const {
+            return qd_score() /  _filled_ids.size();
+        }
         void step()
         {
             if (_infill) {
@@ -189,10 +191,10 @@ namespace map_elites {
 
         // internal list of filled cells
         std::vector<int> _filled_ids;
-public:
+
         // true when we are still at the infill stage
         bool _infill = true;
-private:
+
         // batch
         using batch_t = Eigen::Matrix<S, Params::batch_size, Params::dim_search_space, Eigen::RowMajor>;
         using batch_fit_t = Eigen::Vector<S, Params::batch_size>;
