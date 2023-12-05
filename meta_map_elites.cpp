@@ -222,8 +222,8 @@ struct FitMapElites {
         _features = (_features).cwiseMin(1.0).cwiseMax(0.0);
         // // just for display / loging / debugging
         // std::cout<<"fit:"<<fit<<" features:"<<_features<<" " << _features_time.rows()<< " "<<std::isnan(_features[0]) << std::endl;
-        assert(!isnan(_features[0]));
-        assert(!isnan(_features[1]));
+        assert(!std::isnan(_features[0]));
+        assert(!std::isnan(_features[1]));
         assert(_features.minCoeff() >= 0);
         assert(_features.maxCoeff() <= 1.0);
         return _features;
