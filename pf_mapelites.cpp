@@ -33,7 +33,7 @@ namespace meta_mapelites {
 
 } // namespace meta_mapelites
 
-// this is the fitness function found (based on GPs)
+// this is the wrapper around the fitness function found (based on GPs)
 // batch : (batch_size, dim) batch of solutions.
 // for some reason this cannot be in the namespace?
 void fit_gp(const nb::DRef<Eigen::VectorXd>& fit_params,
@@ -111,4 +111,10 @@ void fit_gp(const nb::DRef<Eigen::VectorXd>& fit_params,
 NB_MODULE(pf_mapelites, m)
 {
     m.def("fit_gp", &fit_gp);
+}
+
+
+NB_MODULE(pf_mapelites, m)
+{
+    m.def("fit_meta", &fit_meta);
 }
