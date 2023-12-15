@@ -34,7 +34,7 @@ result_archive = GridArchive(solution_dim=DIM,
 emitters = [
     EvolutionStrategyEmitter(
         archive,
-        x0=np.ones(DIM) / 0.5,
+        x0=np.ones(DIM) * 0.5,
         sigma0=0.5,
         ranker="imp",
         selection_rule="mu",
@@ -56,7 +56,7 @@ def map_elites(solution_batch):
     """
     objective_batch = np.zeros((solution_batch.shape[0],))
     measures_batch = np.zeros((solution_batch.shape[0], 2))
-    pf_mapelites.fit(solution_batch, objective_batch, measures_batch)
+    pf_mapelites.fit_meta(solution_batch, objective_batch, measures_batch)
     return objective_batch, measures_batch
 
 
