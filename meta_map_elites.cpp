@@ -1,6 +1,6 @@
 #define EIGEN_STACK_ALLOCATION_LIMIT 0
-#include <memory>
 #include <iterator>
+#include <memory>
 
 #include <Eigen/Cholesky>
 #include <Eigen/Core>
@@ -8,308 +8,281 @@
 
 #include "map_elites.hpp"
 #include "ugp.hpp"
+#include "fit_gp.hpp"
 
-// alternative : INDUCTION POINTS !
-template <typename Params, typename S = double>
-struct FitFunction { // describe generic composition of functions
-    // the vector that specifies the function itself
-    static constexpr int num_function_kinds = 5; // sin, cos, tanh, linear, exp
-    static constexpr int func_spec_dim = Params::layer_1 // number of functions in layer 1
-        + Params::layer_2 // number of functions in layer 2
-        + (1 + Params::dim_features) // functions of the output layer
-        + Params::dim_search_space * Params::layer_1 // weights from input to layer 1
-        + Params::layer_1 * Params::layer_2 // weights from layer 1 to layer 2
-        + Params::layer_2 * (1 + Params::dim_features); // weights from layer_2 to outputs
-    using func_spec_t = Eigen::Vector<S, func_spec_dim>;
-    Eigen::Matrix<S, Params::dim_search_space, Params::layer_1, Eigen::RowMajor> _weights_in_to_1;
-    Eigen::Matrix<S, Params::layer_1, Params::layer_2, Eigen::RowMajor> _weights_1_to_2;
-    Eigen::Matrix<S, Params::layer_2, (1 + Params::dim_features), Eigen::RowMajor> _weights_2_to_out;
-    Eigen::Matrix<int, 1, Params::layer_1, Eigen::RowMajor> _layer_1_funcs;
-    Eigen::Matrix<S, 1, Params::layer_1, Eigen::RowMajor> _layer_1_res;
-    Eigen::Matrix<int, 1, Params::layer_2, Eigen::RowMajor> _layer_2_funcs;
-    Eigen::Matrix<S, 1, Params::layer_2, Eigen::RowMajor> _layer_2_res;
-    Eigen::Matrix<int, 1, 1 + Params::dim_features, Eigen::RowMajor> _out_funcs;
-    Eigen::Matrix<S, 1, 1 + Params::dim_features, Eigen::RowMajor> _out_res;
+namespace meta_mapelites {
+    // alternative : INDUCTION POINTS !
+    template <typename Params, typename S = double>
+    struct FitFunction { // describe generic composition of functions
+        // the vector that specifies the function itself
+        static constexpr int num_function_kinds = 5; // sin, cos, tanh, linear, exp
+        static constexpr int func_spec_dim = Params::layer_1 // number of functions in layer 1
+            + Params::layer_2 // number of functions in layer 2
+            + (1 + Params::dim_features) // functions of the output layer
+            + Params::dim_search_space * Params::layer_1 // weights from input to layer 1
+            + Params::layer_1 * Params::layer_2 // weights from layer 1 to layer 2
+            + Params::layer_2 * (1 + Params::dim_features); // weights from layer_2 to outputs
+        using func_spec_t = Eigen::Vector<S, func_spec_dim>;
+        Eigen::Matrix<S, Params::dim_search_space, Params::layer_1, Eigen::RowMajor> _weights_in_to_1;
+        Eigen::Matrix<S, Params::layer_1, Params::layer_2, Eigen::RowMajor> _weights_1_to_2;
+        Eigen::Matrix<S, Params::layer_2, (1 + Params::dim_features), Eigen::RowMajor> _weights_2_to_out;
+        Eigen::Matrix<int, 1, Params::layer_1, Eigen::RowMajor> _layer_1_funcs;
+        Eigen::Matrix<S, 1, Params::layer_1, Eigen::RowMajor> _layer_1_res;
+        Eigen::Matrix<int, 1, Params::layer_2, Eigen::RowMajor> _layer_2_funcs;
+        Eigen::Matrix<S, 1, Params::layer_2, Eigen::RowMajor> _layer_2_res;
+        Eigen::Matrix<int, 1, 1 + Params::dim_features, Eigen::RowMajor> _out_funcs;
+        Eigen::Matrix<S, 1, 1 + Params::dim_features, Eigen::RowMajor> _out_res;
 
-    // the solutions that are evaluated by this function
-    using indiv_t = Eigen::Matrix<S, 1, Params::dim_search_space, Eigen::RowMajor>;
-    using features_t = Eigen::Matrix<S, 1, Params::dim_features, Eigen::RowMajor>;
+        // the solutions that are evaluated by this function
+        using indiv_t = Eigen::Matrix<S, 1, Params::dim_search_space, Eigen::RowMajor>;
+        using features_t = Eigen::Matrix<S, 1, Params::dim_features, Eigen::RowMajor>;
 
-    // keep the intermediate values to avoid reallocations
-    features_t _features;
-    func_spec_t _spec;
+        // keep the intermediate values to avoid reallocations
+        features_t _features;
+        func_spec_t _spec;
 
-    FitFunction() {} // needed for now
-    FitFunction(const FitFunction& f)
-    {
-        set(f._spec);
-    }
+        FitFunction() {} // needed for now
+        FitFunction(const FitFunction& f)
+        {
+            set(f._spec);
+        }
 
-    // make a specific function: develop the genotype
-    void set(const func_spec_t& func_spec)
-    {
-        _spec = func_spec;
-        int k = 0;
+        // make a specific function: develop the genotype
+        void set(const func_spec_t& func_spec)
+        {
+            _spec = func_spec;
+            int k = 0;
 
-        for (size_t i = 0; i < Params::layer_1; ++i)
-            _layer_1_funcs[i] = int(func_spec[k++] * num_function_kinds);
+            for (size_t i = 0; i < Params::layer_1; ++i)
+                _layer_1_funcs[i] = int(func_spec[k++] * num_function_kinds);
 
-        for (size_t i = 0; i < Params::layer_2; ++i)
-            _layer_2_funcs[i] = int(func_spec[k++] * num_function_kinds);
+            for (size_t i = 0; i < Params::layer_2; ++i)
+                _layer_2_funcs[i] = int(func_spec[k++] * num_function_kinds);
 
-        for (size_t i = 0; i < Params::dim_features + 1; ++i)
-            _out_funcs[i] = int(func_spec[k++] * num_function_kinds);
+            for (size_t i = 0; i < Params::dim_features + 1; ++i)
+                _out_funcs[i] = int(func_spec[k++] * num_function_kinds);
 
-        for (size_t i = 0; i < Params::dim_search_space; ++i)
-            for (size_t j = 0; j < Params::layer_1; ++j)
-                _weights_in_to_1(i, j) = func_spec[k++] * 2 - 1.0;
+            for (size_t i = 0; i < Params::dim_search_space; ++i)
+                for (size_t j = 0; j < Params::layer_1; ++j)
+                    _weights_in_to_1(i, j) = func_spec[k++] * 2 - 1.0;
 
-        for (size_t i = 0; i < Params::layer_1; ++i)
-            for (size_t j = 0; j < Params::layer_2; ++j)
-                _weights_1_to_2(i, j) = func_spec[k++] * 2 - 1.0;
+            for (size_t i = 0; i < Params::layer_1; ++i)
+                for (size_t j = 0; j < Params::layer_2; ++j)
+                    _weights_1_to_2(i, j) = func_spec[k++] * 2 - 1.0;
 
-        for (size_t i = 0; i < Params::layer_2; ++i)
-            for (size_t j = 0; j < (1 + Params::dim_features); ++j)
-                _weights_2_to_out(i, j) = func_spec[k++] * 2 - 1.0;
-    }
+            for (size_t i = 0; i < Params::layer_2; ++i)
+                for (size_t j = 0; j < (1 + Params::dim_features); ++j)
+                    _weights_2_to_out(i, j) = func_spec[k++] * 2 - 1.0;
+        }
 
-    const features_t& eval(const indiv_t& v, S& fit)
-    {
-        _layer_1_res = (v * _weights_in_to_1);
-        _inplace_func(_layer_1_funcs, _layer_1_res);
-        _layer_2_res = _layer_1_res * _weights_1_to_2;
-        _inplace_func(_layer_2_funcs, _layer_2_res);
-        _out_res = (_layer_2_res * _weights_2_to_out);
-        _inplace_func(_out_funcs, _out_res);
+        const features_t& eval(const indiv_t& v, S& fit)
+        {
+            _layer_1_res = (v * _weights_in_to_1);
+            _inplace_func(_layer_1_funcs, _layer_1_res);
+            _layer_2_res = _layer_1_res * _weights_1_to_2;
+            _inplace_func(_layer_2_funcs, _layer_2_res);
+            _out_res = (_layer_2_res * _weights_2_to_out);
+            _inplace_func(_out_funcs, _out_res);
 
-        fit = 0.5 * tanh(_out_res[0] + 1); //[0,1]
+            fit = 0.5 * tanh(_out_res[0] + 1); //[0,1]
 
-        // guarantee features in [0,1]
-        for (int i = 0; i < Params::dim_features; ++i)
-            _features[i] = 0.5 * (tanh(_out_res[1 + i]) + 1);
-        _features = _features.cwiseMin(1).cwiseMax(0); // to be sure...
-        assert(_features.minCoeff() >= 0);
-        assert(_features.maxCoeff() <= 1.0);
-        return _features;
-    }
-    template <typename T1, typename T2>
-    void _inplace_func(const T1& funcs, T2& vec)
-    {
-        assert(funcs.cols() == vec.cols());
-        for (int i = 0; i < funcs.cols(); ++i) {
-            if (funcs[i] == 0)
-                vec[i] = sin(vec[i]);
-            else if (funcs[i] == 1)
-                vec[i] = cos(vec[i]);
-            else if (funcs[i] == 2)
-                vec[i] = exp(vec[i]);
-            else if (funcs[i] == 3)
-                vec[i] = vec[i]; // nothing
-            else if (funcs[i] == 4)
-                vec[i] = tanh(vec[i]); // nothing
-            else {
-                std::cerr << "Unknown function ID:" << funcs[i] << " for i=" << i << std::endl;
-                assert(0);
+            // guarantee features in [0,1]
+            for (int i = 0; i < Params::dim_features; ++i)
+                _features[i] = 0.5 * (tanh(_out_res[1 + i]) + 1);
+            _features = _features.cwiseMin(1).cwiseMax(0); // to be sure...
+            assert(_features.minCoeff() >= 0);
+            assert(_features.maxCoeff() <= 1.0);
+            return _features;
+        }
+        template <typename T1, typename T2>
+        void _inplace_func(const T1& funcs, T2& vec)
+        {
+            assert(funcs.cols() == vec.cols());
+            for (int i = 0; i < funcs.cols(); ++i) {
+                if (funcs[i] == 0)
+                    vec[i] = sin(vec[i]);
+                else if (funcs[i] == 1)
+                    vec[i] = cos(vec[i]);
+                else if (funcs[i] == 2)
+                    vec[i] = exp(vec[i]);
+                else if (funcs[i] == 3)
+                    vec[i] = vec[i]; // nothing
+                else if (funcs[i] == 4)
+                    vec[i] = tanh(vec[i]); // nothing
+                else {
+                    std::cerr << "Unknown function ID:" << funcs[i] << " for i=" << i << std::endl;
+                    assert(0);
+                }
             }
         }
-    }
-};
-bool print = false;
+    };
+    bool print = false;
+    std::ofstream ofs_temp("fit_track.dat");
 
-template <typename Params, typename S = double>
-struct FitGP {
-    using features_t = Eigen::Matrix<S, 1, Params::dim_features, Eigen::RowMajor>;
-    using indiv_t = Eigen::Matrix<S, 1, Params::dim_search_space, Eigen::RowMajor>;
-    using gp_t = GP<Params::gp_num_points, Params::dim_search_space>;
-    using gps_t = std::array<gp_t, Params::dim_features + 1>;
-    using data_gps_t = std::array<S, gp_t::data_size>;
-    static constexpr int meta_indiv_size = (Params::dim_features + 1) * gp_t::data_size;
-    using meta_indiv_t = Eigen::Matrix<S, 1, meta_indiv_size, Eigen::RowMajor>;
-    gps_t _gps;
-    features_t _features;
+    template <typename Params, typename ParamsRandom, typename MetaParams, typename S = double>
+    struct FitMapElites {
+        using indiv_t = Eigen::Matrix<S, 1, MetaParams::dim_search_space, Eigen::RowMajor>;
+        using features_t = Eigen::Matrix<S, 1, MetaParams::dim_features, Eigen::RowMajor>;
+        using features_time_t = Eigen::Matrix<S, MetaParams::nb_iterations, MetaParams::dim_features, Eigen::RowMajor>;
 
-    void set(const meta_indiv_t& v)
-    {
-        for (int i = 0; i < Params::dim_features + 1; ++i)
-            _gps[i].set(v.template block<1, gp_t::data_size>(0, i * gp_t::data_size));
-    }
-
-    const features_t& eval(const indiv_t& v, S& fit)
-    {
-        for (int i = 0; i < Params::dim_features; ++i)
-            _features(i) = _gps[i].query(v);
-        fit = _gps[Params::dim_features].query(v);
-        _features = _features.cwiseMin(1).cwiseMax(0);
-        assert(!std::isnan(_features.sum()));
-        assert(!std::isinf(_features.sum()));
-        assert(_features.minCoeff() >= 0);
-        assert(_features.maxCoeff() <= 1.0);
-        return _features;
-    }
-};
-std::ofstream ofs_temp("fit_track.dat");
-
-template <typename Params, typename ParamsRandom, typename MetaParams, typename S = double>
-struct FitMapElites {
-    using indiv_t = Eigen::Matrix<S, 1, MetaParams::dim_search_space, Eigen::RowMajor>;
-    using features_t = Eigen::Matrix<S, 1, MetaParams::dim_features, Eigen::RowMajor>;
-    using features_time_t = Eigen::Matrix<S, MetaParams::nb_iterations, MetaParams::dim_features, Eigen::RowMajor>;
-
-    features_t _features;
-    features_t _max_features;
-    features_time_t _features_time;
+        features_t _features;
+        features_t _max_features;
+        features_time_t _features_time;
 
 #ifdef FUNCTION_COMPOSITION
-    using fit_t = FitFunction<Params>;
+        using fit_t = FitFunction<Params>;
 #else
-    using fit_t = FitGP<Params>;
+        using fit_t = FitGP<Params>;
 #endif
-    using map_elites_t = map_elites::MapElites<Params, fit_t>;
-    using random_elites_t = map_elites::MapElites<ParamsRandom, fit_t>;
-    using archive_fit_t = typename map_elites_t::archive_fit_t;
-    fit_t fit_function;
-    archive_fit_t final_me_archive;
-    archive_fit_t final_re_archive;
-    // typename fit_t::indiv_t center = fit_t::indiv_t::Ones() * 0.5;
-    indiv_t center = (indiv_t::Ones() * 0.5).normalized();
+        using map_elites_t = map_elites::MapElites<Params, fit_t>;
+        using random_elites_t = map_elites::MapElites<ParamsRandom, fit_t>;
+        using archive_fit_t = typename map_elites_t::archive_fit_t;
+        fit_t fit_function;
+        archive_fit_t final_me_archive;
+        archive_fit_t final_re_archive;
+        // typename fit_t::indiv_t center = fit_t::indiv_t::Ones() * 0.5;
+        indiv_t center = (indiv_t::Ones() * 0.5).normalized();
 
-    FitMapElites() {}
-    FitMapElites(const FitMapElites&) {}
-    FitMapElites& operator=(const FitMapElites&) { return *this; }
+        FitMapElites() {}
+        FitMapElites(const FitMapElites&) {}
+        FitMapElites& operator=(const FitMapElites&) { return *this; }
 
-    const features_t& eval(const indiv_t& v, S& fit)
-    {
-        // random
-        random_elites_t random_elites;
-        fit_function.set(v);
-        random_elites.set_fit_function(fit_function);
-        random_elites.reset();
-        for (int i = 0; i < _features_time.rows(); ++i) {
-            random_elites.step();
-        }
-        final_re_archive = random_elites.archive_fit();
-
-        // map-elites
-        static constexpr int n_me = 3;
-        double me_mean = std::numeric_limits<double>::max(),
-               me_coverage = std::numeric_limits<double>::max(),
-               me_qd_score = std::numeric_limits<double>::max();
-
-        for (int i = 0; i < n_me; ++i) {
-            map_elites_t map_elites;
-            map_elites.set_fit_function(fit_function);
+        const features_t& eval(const indiv_t& v, S& fit)
+        {
+            // random
+            random_elites_t random_elites;
+            fit_function.set(v);
+            random_elites.set_fit_function(fit_function);
+            random_elites.reset();
             for (int i = 0; i < _features_time.rows(); ++i) {
-                map_elites.step();
+                random_elites.step();
             }
-            me_mean = std::min(me_mean, map_elites.mean());
-            me_coverage = std::min(me_coverage, map_elites.coverage());
-            me_qd_score = std::min(me_qd_score, map_elites.qd_score());
-            // only the last one will be kept
-            final_me_archive = map_elites.archive_fit();
+            final_re_archive = random_elites.archive_fit();
+
+            // map-elites
+            static constexpr int n_me = 3;
+            double me_mean = std::numeric_limits<double>::max(),
+                   me_coverage = std::numeric_limits<double>::max(),
+                   me_qd_score = std::numeric_limits<double>::max();
+
+            for (int i = 0; i < n_me; ++i) {
+                map_elites_t map_elites;
+                map_elites.set_fit_function(fit_function);
+                for (int i = 0; i < _features_time.rows(); ++i) {
+                    map_elites.step();
+                }
+                me_mean = std::min(me_mean, map_elites.mean());
+                me_coverage = std::min(me_coverage, map_elites.coverage());
+                me_qd_score = std::min(me_qd_score, map_elites.qd_score());
+                // only the last one will be kept
+                final_me_archive = map_elites.archive_fit();
+            }
+
+            _features[0] = (double)random_elites.coverage() / me_coverage;
+            _features[1] = (double)random_elites.mean() / me_mean;
+            // std::cout << random_elites.qd_score() << " " << me_qd_score << " " << me_mean << std::endl;
+            fit = (me_qd_score - random_elites.qd_score()); // TODO: normalize the QD score?
+
+            if (std::isnan(_features[0]) || std::isnan(_features[1])
+                || std::isinf(_features[0])
+                || std::isinf(_features[1])) {
+                _features[0] = 0.0;
+                _features[1] = 0.0;
+            }
+
+            _features = (_features).cwiseMin(1.0).cwiseMax(0.0);
+            // // just for display / loging / debugging
+            // std::cout<<"fit:"<<fit<<" features:"<<_features<<" " << _features_time.rows()<< " "<<std::isnan(_features[0]) << std::endl;
+            assert(!std::isnan(_features[0]));
+            assert(!std::isnan(_features[1]));
+            assert(_features.minCoeff() >= 0);
+            assert(_features.maxCoeff() <= 1.0);
+            return _features;
         }
+    };
 
-        _features[0] = (double)random_elites.coverage() / me_coverage;
-        _features[1] = (double)random_elites.mean() / me_mean;
-        //std::cout << random_elites.qd_score() << " " << me_qd_score << " " << me_mean << std::endl;
-        fit = (me_qd_score - random_elites.qd_score()); // TODO: normalize the QD score?
+    struct Params {
+        static constexpr int layer_1 = 3;
+        static constexpr int layer_2 = 4;
+        static constexpr int gp_num_points = 20;
 
-        if (std::isnan(_features[0]) || std::isnan(_features[1])
-            || std::isinf(_features[0])
-            || std::isinf(_features[1])) {
-            _features[0] = 0.0;
-            _features[1] = 0.0;
-        }
+        static constexpr int dim_features = 2;
+        static constexpr int dim_search_space = 5;
+        static constexpr int batch_size = 64;
+        static constexpr double sigma_1 = 0.15;
+        static constexpr double sigma_2 = 0.01;
+        static constexpr double infill_pct = 0.05;
+        static constexpr bool verbose = false;
+        static constexpr bool grid = true;
+        static constexpr bool parallel = false;
+        static constexpr int grid_size = 64;
+        static constexpr int num_cells = grid ? grid_size * grid_size : 12000; // 12000; // 8192;
+        static constexpr double min_fit = -1e10;
+    };
 
-        _features = (_features).cwiseMin(1.0).cwiseMax(0.0);
-        // // just for display / loging / debugging
-        // std::cout<<"fit:"<<fit<<" features:"<<_features<<" " << _features_time.rows()<< " "<<std::isnan(_features[0]) << std::endl;
-        assert(!std::isnan(_features[0]));
-        assert(!std::isnan(_features[1]));
-        assert(_features.minCoeff() >= 0);
-        assert(_features.maxCoeff() <= 1.0);
-        return _features;
-    }
-};
+    struct ParamsRandom {
+        static constexpr int layer_1 = 3;
+        static constexpr int layer_2 = 4;
+        static constexpr int gp_num_points = 20;
 
-struct Params {
-    static constexpr int layer_1 = 3;
-    static constexpr int layer_2 = 4;
-    static constexpr int gp_num_points = 20;
+        static constexpr int dim_features = 2;
+        static constexpr int dim_search_space = 5;
+        static constexpr int batch_size = 64;
+        static constexpr double sigma_1 = 0.15;
+        static constexpr double sigma_2 = 0.05;
+        static constexpr double infill_pct = -1; // we always infill, no evolution
+        static constexpr bool verbose = false;
+        static constexpr bool grid = true;
+        static constexpr bool parallel = false;
+        static constexpr int grid_size = 64;
+        static constexpr int num_cells = grid ? grid_size * grid_size : 12000; // 12000; // 8192;
+        static constexpr double min_fit = -1e10;
+    };
 
-    static constexpr int dim_features = 2;
-    static constexpr int dim_search_space = 5;
-    static constexpr int batch_size = 64;
-    static constexpr double sigma_1 = 0.15;
-    static constexpr double sigma_2 = 0.01;
-    static constexpr double infill_pct = 0.05;
-    static constexpr bool verbose = false;
-    static constexpr bool grid = true;
-    static constexpr bool parallel = false;
-    static constexpr int grid_size = 64;
-    static constexpr int num_cells = grid ? grid_size * grid_size : 12000; // 12000; // 8192;
-    static constexpr double min_fit = -1e10;
-};
-
-struct ParamsRandom {
-    static constexpr int layer_1 = 3;
-    static constexpr int layer_2 = 4;
-    static constexpr int gp_num_points = 20;
-
-    static constexpr int dim_features = 2;
-    static constexpr int dim_search_space = 5;
-    static constexpr int batch_size = 64;
-    static constexpr double sigma_1 = 0.15;
-    static constexpr double sigma_2 = 0.05;
-    static constexpr double infill_pct = -1; // we always infill, no evolution
-    static constexpr bool verbose = false;
-    static constexpr bool grid = true;
-    static constexpr bool parallel = false;
-    static constexpr int grid_size = 64;
-    static constexpr int num_cells = grid ? grid_size * grid_size : 12000; // 12000; // 8192;
-    static constexpr double min_fit = -1e10;
-};
-
-struct MetaParams {
-    static constexpr int dim_features = 2;
+    struct MetaParams {
+        static constexpr int dim_features = 2;
 #ifdef FUNCTION_COMPOSITION
-    static constexpr int dim_search_space = FitFunction<Params>::func_spec_dim;
+        static constexpr int dim_search_space = FitFunction<Params>::func_spec_dim;
 #else
-    static constexpr int dim_search_space = FitGP<Params>::meta_indiv_size;
+        static constexpr int dim_search_space = FitGP<Params>::meta_indiv_size;
 #endif
-    static constexpr int batch_size = 64;
-    static constexpr int nb_iterations = 100000 / batch_size;
-    static constexpr double sigma_1 = 0.15;
-    static constexpr double sigma_2 = 0.01; // bigger?
-    static constexpr bool verbose = true;
-    static constexpr bool grid = true;
-    static constexpr bool parallel = true;
-    static constexpr int grid_size = 64;
-    static constexpr int num_cells = grid ? grid_size * grid_size : 12000; // 12000; // 8192;
-    static constexpr double min_fit = 1;
-    static constexpr double infill_pct = 150. / num_cells; // 0.05;
-};
+        static constexpr int batch_size = 64;
+        static constexpr int nb_iterations = 100000 / batch_size;
+        static constexpr double sigma_1 = 0.15;
+        static constexpr double sigma_2 = 0.01; // bigger?
+        static constexpr bool verbose = true;
+        static constexpr bool grid = true;
+        static constexpr bool parallel = true;
+        static constexpr int grid_size = 64;
+        static constexpr int num_cells = grid ? grid_size * grid_size : 12000; // 12000; // 8192;
+        static constexpr double min_fit = 1;
+        static constexpr double infill_pct = 150. / num_cells; // 0.05;
+    };
 
-// load an eigen matrix
-template <typename M>
-void load(const std::string& path, M& m)
-{
-    std::cout << "loading " << path << "..." << std::endl;
-    std::ifstream ifs(path.c_str());
-    assert(ifs.good());
-    // load all the values (treat \n as space here, so no info on column)
-    std::vector<double> data = std::vector<double>{
-        std::istream_iterator<double>(ifs),
-        std::istream_iterator<double>()};
-    // ensure that all the lines are full
-    assert(data.size() % m.cols() == 0);
-    // copy to the matrix
-    for (int i = 0, k = 0; i < m.rows(); ++i)
-        for (int j = 0; j < m.cols(); ++j)
-            m(i, j) = data[k++];
-}
+    // load an eigen matrix
+    template <typename M>
+    void load(const std::string& path, M& m)
+    {
+        std::cout << "loading " << path << "..." << std::endl;
+        std::ifstream ifs(path.c_str());
+        assert(ifs.good());
+        // load all the values (treat \n as space here, so no info on column)
+        std::vector<double> data = std::vector<double>{
+            std::istream_iterator<double>(ifs),
+            std::istream_iterator<double>()};
+        // ensure that all the lines are full
+        assert(data.size() % m.cols() == 0);
+        // copy to the matrix
+        for (int i = 0, k = 0; i < m.rows(); ++i)
+            for (int j = 0; j < m.cols(); ++j)
+                m(i, j) = data[k++];
+    }
+} // namespace meta_mapelites
+
 
 int main(int argc, char** argv)
 {
+    using namespace meta_mapelites;
     srand((unsigned int)time(0));
     // using gp_t = GP<10, 2>;
     // gp_t gp; // 4 points, 2D
@@ -386,6 +359,7 @@ int main(int argc, char** argv)
 
         std::ofstream all_fit("all_fit.dat");
         std::cout << "writing...";
+        auto start = std::chrono::high_resolution_clock::now();
         for (int i = 0; i < 500; ++i) {
             // tbb::parallel_for(size_t(0), size_t(archive->rows() / 100), size_t(1), [&](size_t i) {
 
@@ -409,6 +383,10 @@ int main(int argc, char** argv)
             }
             // all_fit << i << " " << f << " " << features << " " << (*archive_fit)[i] << std::endl;
         } //); // end parallel for
+          auto end = std::chrono::high_resolution_clock::now();
+        double t = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+
+        std::cout << "Total time:" << t / 1000.0 << "s" << std::endl;
     }
     return 0;
 }

@@ -7,6 +7,7 @@ import sys
 from matplotlib.ticker import FuncFormatter
 #from sklearn.neighbors import KDTree
 import matplotlib.cm as cm
+import math
 
 my_cmap = cm.viridis
 
@@ -132,10 +133,15 @@ def plot_cvt(ax, centroids, fit, min_fit, max_fit):
        # index = q[1][0][0]
         region = regions[i]
         polygon = vertices[region]
-        if fit[i] < min_fit:
+        if fit[i] > 0:
+            f = math.log(fit[i])
+        else:
+            f = min_fit
+        if f < min_fit:
             ax.fill(*zip(*polygon), alpha=0.9, color='black')
         else:
-            ax.fill(*zip(*polygon), alpha=0.9, color=my_cmap(norm(fit[i])))
+            ax.fill(*zip(*polygon), alpha=0.9, color=my_cmap(norm(f)))
+        
         k += 1
         if k % 100 == 0:
             print(k, end=" ", flush=True)

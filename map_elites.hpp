@@ -94,6 +94,10 @@ namespace map_elites {
         double mean() const {
             return qd_score() /  _filled_ids.size();
         }
+        double qd_score_normalized() const 
+        {
+            return qd_score() / _centroids.rows();
+        }
         void step()
         {
             if (_infill) {
