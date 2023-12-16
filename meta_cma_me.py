@@ -2,17 +2,20 @@
 import numpy as np
 from os.path import exists
 import os, sys
-import subprocess
 from tqdm import tqdm, trange
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 from glob import glob
 from matplotlib  import cm
 
+import json
+
 from ribs.archives import GridArchive
 from ribs.emitters import EvolutionStrategyEmitter
 from ribs.schedulers import Scheduler
+from ribs.visualize import grid_archive_heatmap
 
 sys.path.append('/Users/jmouret/git/resibots/fast_map-elites/build')
 import pf_mapelites
@@ -44,7 +47,15 @@ emitters = [
 ]
 
 scheduler = Scheduler(archive, emitters, result_archive=result_archive)
-    
+
+
+
+def save_heatmap(archive, heatmap_path):
+    plt.figure(figsize=(8, 6))
+    grid_archive_heatmap(archive, vmin=0, vmax=100)
+    plt.tight_layout()
+    plt.savefig(heatmap_path)
+    plt.close(plt.gcf())
 
 def map_elites(solution_batch):
     """
@@ -60,16 +71,56 @@ def map_elites(solution_batch):
     return objective_batch, measures_batch
 
 
-total_itrs = 10_000
+metrics = {
+    "QD Score": {
+        "x": [0],
+        "y": [0.0],
+    },
+    "Archive Coverage": {
+        "x": [0],
+        "y": [0.0],
+    },
+}
+
+total_itrs = int(100_000 / (36 * len(emitters)))
+log_freq=10
+outdir = 'cma_me/'
+outdir = Path(outdir)
+if not outdir.is_dir():
+    outdir.mkdir()
+
 for itr in trange(1, total_itrs + 1, file=sys.stdout, desc='Iterations'):
-    print(itr)
     solution_batch = scheduler.ask()
-    print('ask ok:', solution_batch.shape)
     objective_batch, measure_batch = map_elites(solution_batch)
     scheduler.tell(objective_batch, measure_batch)
 
-    # Output progress every 500 iterations or on the final iteration.
-    #if itr % 500 == 0 or itr == total_itrs:
+    # Output progress 
     tqdm.write(f"Iteration {itr:5d} | "
                    f"Archive Coverage: {result_archive.stats.coverage * 100:6.3f}%  "
                    f"Normalized QD Score: {result_archive.stats.norm_qd_score:6.3f}")
+    
+    # Logging and output.
+    if itr == total_itrs:
+        result_archive.data(return_type="pandas").to_csv(
+            outdir / f"cma_me_archive.csv")
+
+    # Record and display metrics.
+    metrics["QD Score"]["x"].append(itr)
+    metrics["QD Score"]["y"].append(result_archive.stats.norm_qd_score)
+    metrics["Archive Coverage"]["x"].append(itr)
+    metrics["Archive Coverage"]["y"].append(
+        result_archive.stats.coverage)
+    
+    save_heatmap(result_archive,
+                    str(outdir / f"cma_me_heatmap_{itr:05d}.png"))
+
+# Plot metrics.
+for metric, values in metrics.items():
+    plt.plot(values["x"], values["y"])
+    plt.title(metric)
+    plt.xlabel("Iteration")
+    plt.savefig(
+        str(outdir / f"cma_me_{metric.lower().replace(' ', '_')}.png"))
+    plt.clf()
+with (outdir / f"cma_me_metrics.json").open("w") as file:
+    json.dump(metrics, file, indent=2)
