@@ -122,7 +122,7 @@ int main(int argc, char** argv)
         std::cout << "starting meta map-elites" << std::endl;
         std::ofstream qd_ofs("qd.dat");
 
-        for (size_t i = 0; i < 100000 / Params::batch_size*/; ++i) {
+        for (size_t i = 0; i < 100000 / Params::batch_size; ++i) {
             map_elites->step();
             qd_ofs << i * Params::batch_size << " " << map_elites->qd_score_normalized() << " " << map_elites->coverage() << std::endl;
             if (MetaParams::verbose)
