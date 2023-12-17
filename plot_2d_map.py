@@ -163,7 +163,7 @@ if __name__ == "__main__":
         max_fit = float(sys.argv[4])
     else:
         min_fit = min(fit)
-        max_fit = max(fit)
+        max_fit = math.log(max(fit))
     print("Min = {} Max={}".format(min_fit, max_fit))
     # Plot
     fig, axes = plt.subplots(1, 1, figsize=(10, 10), facecolor='white', edgecolor='white')

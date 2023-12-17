@@ -59,7 +59,7 @@ namespace meta_mapelites {
                 }
                 me_mean = std::min(me_mean, map_elites.mean());
                 me_coverage = std::min(me_coverage, map_elites.coverage());
-                me_qd_score = std::min(me_qd_score, map_elites.qd_score());
+                me_qd_score = std::min(me_qd_score, map_elites.qd_score_normalized());
                 // only the last one will be kept
                 final_me_archive = map_elites.archive_fit();
             }
@@ -67,7 +67,7 @@ namespace meta_mapelites {
             _features[0] = (double)random_elites.coverage() / me_coverage;
             _features[1] = (double)random_elites.mean() / me_mean;
             // std::cout << random_elites.qd_score() << " " << me_qd_score << " " << me_mean << std::endl;
-            fit = (me_qd_score - random_elites.qd_score()); // TODO: normalize the QD score?
+            fit = (me_qd_score - random_elites.qd_score_normalized()); // TODO: normalize the QD score?
 
             if (std::isnan(_features[0]) || std::isnan(_features[1])
                 || std::isinf(_features[0])

@@ -124,7 +124,7 @@ int main(int argc, char** argv)
 
         for (size_t i = 0; i < 550 /*1e6 / Params::batch_size*/; ++i) {
             map_elites->step();
-            qd_ofs << i * Params::batch_size << " " << map_elites->qd_score() << " " << map_elites->coverage() << std::endl;
+            qd_ofs << i * Params::batch_size << " " << map_elites->qd_score_normalized() << " " << map_elites->coverage() << std::endl;
             if (MetaParams::verbose)
                 std::cout << map_elites->coverage() << "[" << i << "] ";
             std::cout.flush();
@@ -169,7 +169,7 @@ int main(int argc, char** argv)
         std::ofstream all_fit("all_fit.dat");
         std::cout << "writing...";
         auto start = std::chrono::high_resolution_clock::now();
-        for (int i = 0; i < 500; ++i) {
+        for (int i = 0; i < archive->rows(); ++i) {
             // tbb::parallel_for(size_t(0), size_t(archive->rows() / 100), size_t(1), [&](size_t i) {
 
             if ((*archive_fit)[i] > -1e10) // hack, should be == -std::numeric_limits<S>::max()
